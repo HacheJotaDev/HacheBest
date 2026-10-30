@@ -30,20 +30,20 @@ export const DEFAULT_GAME_CONFIG: Record<
   GameId,
   { name: string; configJson: object }
 > = {
-  parimpar: { name: "Par o Impar", configJson: { multiplier: 1.95 } },
+  parimpar: { name: "Par o Impar", configJson: { multiplier: 1.9 } },
   exacto: { name: "Número Exacto", configJson: { multiplier: 36 } },
-  moneda: { name: "Cara o Cruz", configJson: { multiplier: 1.95 } },
-  dado: { name: "Dado", configJson: { houseEdge: 3 } }, // multiplicador = (100-edge)/chance
-  tictactoe: { name: "3 en Raya", configJson: { winMultiplier: 2.2 } },
-  ppt: { name: "Piedra, Papel o Tijera", configJson: { winMultiplier: 1.9 } },
+  moneda: { name: "Cara o Cruz", configJson: { multiplier: 1.9 } },
+  dado: { name: "Dado", configJson: { houseEdge: 5 } }, // multiplicador = (100-edge)/chance
+  tictactoe: { name: "3 en Raya", configJson: { winMultiplier: 2 } },
+  ppt: { name: "Piedra, Papel o Tijera", configJson: { winMultiplier: 1.85 } },
   ruleta: { name: "Ruleta", configJson: { pleno: 36, doble: 2, docena: 3 } },
-  tragamonedas: { name: "Tragamonedas", configJson: { maxPrize: 50 } },
+  tragamonedas: { name: "Tragamonedas", configJson: { maxPrize: 30 } },
   rueda: { name: "Rueda de la Fortuna", configJson: { segments: 26 } },
   plinko: { name: "Plinko", configJson: { rows: 12 } },
   bacara: { name: "Bacará", configJson: { jugador: 2, banca: 1.95, empate: 9 } },
   rasca: { name: "Rasca y Gana", configJson: { maxPrize: 20 } },
-  cartaalta: { name: "Carta Más Alta", configJson: { winMultiplier: 1.95 } },
-  mayormenor: { name: "Mayor o Menor", configJson: { houseEdge: 3 } },
+  cartaalta: { name: "Carta Más Alta", configJson: { winMultiplier: 1.9 } },
+  mayormenor: { name: "Mayor o Menor", configJson: { houseEdge: 5 } },
   blackjack: { name: "Blackjack", configJson: { blackjackPays: 2.5, winPays: 2 } },
 };
 
@@ -165,17 +165,17 @@ function lose(resultJson: object, betType: string, amount: number): PlayResult {
   return { outcome: "lose", multiplier: 0, payout: 0, betType, resultJson };
 }
 
-// PAR o IMPAR — número 0-99 · 50/50: la casa decide el resultado antes del sorteo
-// y paga 1.95x → ventaja de la casa del 2,5 % aunque el acierto sea 50 %.
+// PAR o IMPAR — número 0-99 · la casa decide el resultado antes del sorteo
+// y paga 1.9x con 45% de acierto → ventaja de la casa ≈ 12 %.
 function playParImpar(ctx: Ctx): PlayResult {
   const picked = ctx.betType === "par";
   const userWon = rollUserWin();
   // n ∈ [0, 99]: pares = 2k (k: 0..49) · impares = 2k+1 (k: 0..49)
   const n = userWon === picked ? randomInt(0, 50) * 2 : randomInt(0, 50) * 2 + 1;
   const isPar = n % 2 === 0;
-  const resultJson = { number: n, parity: isPar ? "par" : "impar", mode: "50-50" };
+  const resultJson = { number: n, parity: isPar ? "par" : "impar", mode: "casa" };
   return isPar === picked
-    ? win(ctx, Number(ctx.cfg.multiplier ?? 1.95), resultJson)
+    ? win(ctx, Number(ctx.cfg.multiplier ?? 1.9), resultJson)
     : lose(resultJson, ctx.betType, ctx.amount);
 }
 
@@ -194,19 +194,18 @@ function playExacto(ctx: Ctx): PlayResult {
     ? win(ctx, Number(ctx.cfg.multiplier ?? 36), resultJson)
     : lose(resultJson, ctx.betType, ctx.amount);
 }
-
-// CARA o CRUZ — 50/50 decidido por la casa antes de lanzar la moneda
+// CARA o CRUZ — la casa decide antes de lanzar la moneda
 function playMoneda(ctx: Ctx): PlayResult {
   const userWon = rollUserWin();
   const side = userWon ? ctx.betType : ctx.betType === "cara" ? "cruz" : "cara";
-  const resultJson = { side, mode: "50-50" };
+  const resultJson = { side, mode: "casa" };
   return side === ctx.betType
-    ? win(ctx, Number(ctx.cfg.multiplier ?? 1.95), resultJson)
+    ? win(ctx, Number(ctx.cfg.multiplier ?? 1.9), resultJson)
     : lose(resultJson, ctx.betType, ctx.amount);
 }
 
 // DADO — rueda 0.00 – 99.99, apuestas mayor/menor que el objetivo
-// La ventaja base (1 %) sube dinámicamente si la casa está en déficit.
+// La ventaja base (5 %, casino duro) sube dinámicamente si la casa está en déficit.
 function playDado(ctx: Ctx): PlayResult {
   const target = Number(ctx.extra?.target);
   const edge = effectiveEdge(Number(ctx.cfg.houseEdge ?? 1));
@@ -235,9 +234,9 @@ function playPpt(ctx: Ctx): PlayResult {
   const house = userWon
     ? PPT_BEATS[player] // la casa saca la figura que pierde contra el jugador
     : options.find((o) => PPT_BEATS[o] === player) ?? "piedra"; // la que gana al jugador
-  const resultJson = { player, house, mode: "50-50" };
+  const resultJson = { player, house, mode: "casa" };
   return userWon
-    ? win(ctx, Number(ctx.cfg.winMultiplier ?? 1.9), resultJson)
+    ? win(ctx, Number(ctx.cfg.winMultiplier ?? 1.85), resultJson)
     : lose(resultJson, ctx.betType, ctx.amount);
 }
 
@@ -298,14 +297,14 @@ function playRuleta(ctx: Ctx): PlayResult {
 }
 
 // ── TRAGAMONEDAS ─────────────────────────────────────────────
-// RTP ≈ 91 % — la casa se queda ~9 % a largo plazo
+// RTP ≈ 84 % — casino de verdad: la casa se queda ~16 % a largo plazo
 export const SLOT_SYMBOLS = [
-  { id: "cereza", weight: 5, triple: 5 },
-  { id: "limon", weight: 4, triple: 6 },
-  { id: "campana", weight: 3, triple: 10 },
-  { id: "estrella", weight: 2, triple: 15 },
-  { id: "diamante", weight: 1, triple: 40 },
-  { id: "siete", weight: 1, triple: 50 },
+  { id: "cereza", weight: 5, triple: 4 },
+  { id: "limon", weight: 4, triple: 5 },
+  { id: "campana", weight: 3, triple: 9 },
+  { id: "estrella", weight: 2, triple: 12 },
+  { id: "diamante", weight: 1, triple: 30 },
+  { id: "siete", weight: 1, triple: 30 },
 ] as const;
 
 function playTragamonedas(ctx: Ctx): PlayResult {
@@ -328,9 +327,9 @@ function playTragamonedas(ctx: Ctx): PlayResult {
 }
 
 // ── RUEDA DE LA FORTUNA ──────────────────────────────────────
-// 26 segmentos: 14 quiebras (×0), 6×1.5, 4×2, 1×3, 1×5 → retorno teórico ≈ 96 %
+// 26 segmentos: 15 quiebras (×0), 6×1.5, 3×2, 1×3, 1×4 → retorno teórico ≈ 85 %
 export const RUEDA_SEGMENTS: number[] = [
-  0, 1.5, 0, 2, 0, 1.5, 0, 3, 0, 1.5, 0, 2, 0, 1.5, 0, 5, 0, 1.5, 0, 2, 0, 1.5, 0, 2, 0, 0,
+  0, 1.5, 0, 2, 0, 1.5, 0, 3, 0, 1.5, 0, 2, 0, 1.5, 0, 4, 0, 1.5, 0, 2, 0, 1.5, 0, 2, 0, 0,
 ];
 
 function playRueda(ctx: Ctx): PlayResult {
@@ -416,14 +415,14 @@ function playBacara(ctx: Ctx): PlayResult {
 }
 
 // ── RASCA Y GANA ─────────────────────────────────────────────
-// Tarjeta rasca 3×3: tres símbolos iguales pagan. Tabla con ~8 %
-// de ventaja para la casa: 59,7 % nada · 30 % ×1,5 · 7 % ×3 ·
-// 2 % ×5 · 1 % ×10 · 0,3 % ×20.
+// Tarjeta rasca 3×3: tres símbolos iguales pagan. Tabla con ~15 %
+// de ventaja para la casa: 62,4 % nada · 30 % ×1,5 · 6 % ×3 ·
+// 1,5 % ×5 · 0,8 % ×10 · 0,3 % ×20.
 export const RASCA_PRIZES = [
   { mult: 1.5, symbol: "🍋", weight: 300 },
-  { mult: 3, symbol: "🔔", weight: 70 },
-  { mult: 5, symbol: "⭐", weight: 20 },
-  { mult: 10, symbol: "💎", weight: 10 },
+  { mult: 3, symbol: "🔔", weight: 60 },
+  { mult: 5, symbol: "⭐", weight: 15 },
+  { mult: 10, symbol: "💎", weight: 8 },
   { mult: 20, symbol: "7️⃣", weight: 3 },
 ] as const;
 
@@ -483,12 +482,12 @@ function playRasca(ctx: Ctx): PlayResult {
 
 // ── PLINKO ───────────────────────────────────────────────────
 export const PLINKO_ROWS = 12;
-// RTP ≈ 94 % (bajo) · 93 % (medio) · 91 % (alto)
-// Tope de la tabla alto en 100× para que la banca siempre pueda cubrirlo.
+// RTP ≈ 89 % (bajo) · 90 % (medio) · 85 % (alto)
+// Tope de la tabla alto en 90× para que la banca siempre pueda cubrirlo.
 export const PLINKO_TABLES: Record<"bajo" | "medio" | "alto", number[]> = {
-  bajo: [9, 3, 1.6, 1.3, 1.05, 0.9, 0.55, 0.9, 1.05, 1.3, 1.6, 3, 9],
-  medio: [25, 8, 3, 1.6, 1, 0.7, 0.4, 0.7, 1, 1.6, 3, 8, 25],
-  alto: [100, 22, 7.2, 1.8, 0.6, 0.25, 0.2, 0.25, 0.6, 1.8, 7.2, 22, 100],
+  bajo: [8, 3, 1.5, 1.25, 1, 0.85, 0.5, 0.85, 1, 1.25, 1.5, 3, 8],
+  medio: [22, 7, 2.8, 1.55, 1, 0.68, 0.38, 0.68, 1, 1.55, 2.8, 7, 22],
+  alto: [90, 21, 7, 1.75, 0.58, 0.23, 0.19, 0.23, 0.58, 1.75, 7, 21, 90],
 };
 
 function playPlinko(ctx: Ctx): PlayResult {
@@ -516,7 +515,7 @@ function drawCardOf(rankIdx: number): string {
   return r + s;
 }
 
-// CARTA MÁS ALTA — 50/50: la casa decide el ganador y reparte cartas
+// CARTA MÁS ALTA — la casa decide el ganador y reparte cartas
 // coherentes con esa decisión (nunca hay empate).
 function playCartaAlta(ctx: Ctx): PlayResult {
   const R = CARD_RANKS.length; // 13 · A es la más baja, K la más alta
@@ -532,9 +531,9 @@ function playCartaAlta(ctx: Ctx): PlayResult {
   }
   const player = drawCardOf(pi);
   const house = drawCardOf(hi);
-  const resultJson = { player, house, mode: "50-50" };
+  const resultJson = { player, house, mode: "casa" };
   return userWon
-    ? win(ctx, Number(ctx.cfg.winMultiplier ?? 1.95), resultJson)
+    ? win(ctx, Number(ctx.cfg.winMultiplier ?? 1.9), resultJson)
     : lose(resultJson, ctx.betType, ctx.amount);
 }
 

@@ -69,3 +69,4 @@ agent-ctx/
 /db/data.json
 /db/*.tmp
 tool-results/
+scripts/launch-dev.ts

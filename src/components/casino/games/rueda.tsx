@@ -11,7 +11,7 @@ import { fmtUSD } from "@/lib/client";
 import { toast } from "sonner";
 
 // debe coincidir con src/lib/games.ts
-const RUEDA_SEGMENTS = [0, 1.5, 0, 2, 0, 1.5, 0, 3, 0, 1.5, 0, 2, 0, 1.5, 0, 5, 0, 1.5, 0, 2, 0, 1.5, 0, 2, 0, 0];
+const RUEDA_SEGMENTS = [0, 1.5, 0, 2, 0, 1.5, 0, 3, 0, 1.5, 0, 2, 0, 1.5, 0, 4, 0, 1.5, 0, 2, 0, 1.5, 0, 2, 0, 0];
 const SEG = 360 / 26;
 
 // Color de cada segmento según su multiplicador

@@ -370,6 +370,8 @@ function seedGameConfigs(data: DBData) {
  *  · v2 — mecánica 50/50 + protección de la casa
  *  · v3 — ajuste fino de la ventaja (el jefe probó el casino: el usuario
  *         ganaba demasiado en dado/mayor-menor/3-en-raya)
+ *  · v4 — casino de verdad: la casa perdía 96 USD de 100 (el jefe lo
+ *         comprobó). Multiplicadores endurecidos + prob. base 45 %.
  */
 function migrateHouse(data: DBData) {
   let touched = false;
@@ -394,6 +396,22 @@ function migrateHouse(data: DBData) {
     setCfg("dado", { houseEdge: 3 });
     setCfg("mayormenor", { houseEdge: 3 });
     setCfg("tictactoe", { winMultiplier: 2.2 });
+    touched = true;
+  }
+
+  if (data.settings["houseV4"] !== "4") {
+    data.settings["houseV4"] = "4";
+    // Casino de verdad: ventaja matemática SIEMPRE para la casa.
+    setCfg("parimpar", { multiplier: 1.9 });
+    setCfg("moneda", { multiplier: 1.9 });
+    setCfg("ppt", { winMultiplier: 1.85 });
+    setCfg("cartaalta", { winMultiplier: 1.9 });
+    setCfg("tictactoe", { winMultiplier: 2 });
+    setCfg("dado", { houseEdge: 5 });
+    setCfg("mayormenor", { houseEdge: 5 });
+    // Probabilidad base del usuario: 50 → 45 (si el dueño no la bajó ya)
+    const curWin = Number(data.settings["houseUserWinPercent"] ?? "50");
+    if (!Number.isFinite(curWin) || curWin > 45) data.settings["houseUserWinPercent"] = "45";
     touched = true;
   }
 

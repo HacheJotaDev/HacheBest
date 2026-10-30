@@ -179,7 +179,8 @@ export function AdminPanel({ active = true }: { active?: boolean }) {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="Por defecto: HacheAdmin"
+            placeholder="••••••••"
+            autoComplete="current-password"
             autoFocus
           />
         </div>
@@ -310,7 +311,7 @@ function StatsTab({ adminKey, active }: { adminKey: string; active: boolean }) {
             </div>
           </div>
           <Badge variant="outline" className="border-gold/40 text-gold">
-            Mecánica 50/50
+            Mecánica de la casa
           </Badge>
         </div>
       )}
@@ -714,11 +715,11 @@ function SettingsTab({ adminKey }: { adminKey: string }) {
   );
 }
 
-// ── LA CASA (50/50 + protección) ─────────────────────────────
+// ── LA CASA (ventaja + protección) ─────────────────────────
 
 function HouseForm({ adminKey }: { adminKey: string }) {
   const [info, setInfo] = useState<HouseInfo | null>(null);
-  const [win, setWin] = useState(50);
+  const [win, setWin] = useState(45);
   const [prot, setProt] = useState(true);
   const [busy, setBusy] = useState(false);
   const [retiro, setRetiro] = useState("");
@@ -783,7 +784,7 @@ function HouseForm({ adminKey }: { adminKey: string }) {
     <div className="casino-card space-y-4 p-4">
       <div className="flex items-center gap-2">
         <Shield className="size-5 text-gold" aria-hidden />
-        <p className="font-bold">La Casa — mecánica 50/50 + protección</p>
+        <p className="font-bold">La Casa — ventaja de la casa + protección</p>
       </div>
 
       <div className="grid grid-cols-3 gap-3 text-center">
@@ -941,14 +942,14 @@ function HouseForm({ adminKey }: { adminKey: string }) {
         </div>
         <Slider
           value={[win]}
-          min={30}
+          min={25}
           max={70}
           step={1}
           onValueChange={(v) => setWin(v[0] ?? 50)}
           aria-label="Probabilidad de victoria del usuario"
         />
         <div className="flex justify-between text-xs text-muted-foreground">
-          <span>30% (más difícil para el usuario)</span>
+          <span>25% (más difícil para el usuario)</span>
           <span>70% (más fácil)</span>
         </div>
       </div>
@@ -957,7 +958,7 @@ function HouseForm({ adminKey }: { adminKey: string }) {
         <div>
           <p className="text-sm font-bold">Protección de la banca</p>
           <p className="text-xs text-muted-foreground">
-            Si la casa acumula pérdidas, baja la probabilidad del usuario (hasta 38%), sube la
+            Si la casa acumula pérdidas, baja la probabilidad del usuario (hasta 35%), sube la
             ventaja en dado/mayor-menor (+12 pts máx.) y la IA del 3 en raya juega
             casi perfecta.
           </p>
@@ -973,8 +974,9 @@ function HouseForm({ adminKey }: { adminKey: string }) {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Juegos parejos con 50/50 decidido por la casa: Par o Impar, Cara o Cruz, Piedra-Papel-Tijera
-        y Carta Más Alta. La ruleta, el número exacto y la tragamonedas mantienen su ventaja natural.
+        Juegos parejos decididos por la casa (45 % base para el usuario): Par o Impar, Cara o Cruz,
+        Piedra-Papel-Tijera y Carta Más Alta. La ruleta, el número exacto, el bacará y el blackjack
+        mantienen sus ventajas reales de casino.
       </p>
     </div>
   );

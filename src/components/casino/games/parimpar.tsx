@@ -156,7 +156,7 @@ export function ParImparGame() {
             {busy ? "Apostando…" : "Apostar"}
           </Button>
           <p className="text-xs text-muted-foreground">
-            Si aciertas el resultado con tu elección pag <strong className="text-gold">×1,95</strong>{" "}
+            Si aciertas el resultado con tu elección pag <strong className="text-gold">×1,9</strong>{" "}
             tu apuesta.
           </p>
         </div>

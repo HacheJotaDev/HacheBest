@@ -67,7 +67,7 @@ function fmtMult(n: number): string {
   return n.toLocaleString("es-ES", { maximumFractionDigits: 2 });
 }
 
-/** TRAGAMONEDAS — tres rodillos: el trío paga hasta ×50 · dos cerezas ×2 · cualquier otro par ×0,5 */
+/** TRAGAMONEDAS — tres rodillos: el trío paga hasta ×30 · dos cerezas ×2 · cualquier otro par ×0,5 */
 export function TragamonedasGame() {
   const play = useCasino((s) => s.play);
   const user = useCasino((s) => s.user);

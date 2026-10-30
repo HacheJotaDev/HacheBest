@@ -25,20 +25,20 @@ import { useCasino } from "@/store/casino";
 import { fmtUSD } from "@/lib/client";
 
 const GAME_META: Record<string, { icon: React.ElementType; tint: string; maxWin: string }> = {
-  parimpar: { icon: Binary, tint: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30", maxWin: "×1,95" },
+  parimpar: { icon: Binary, tint: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30", maxWin: "×1,9" },
   exacto: { icon: Target, tint: "text-red-400 bg-red-500/10 border-red-500/30", maxWin: "×36" },
-  moneda: { icon: Coins, tint: "text-gold bg-amber-500/10 border-amber-500/30", maxWin: "×1,95" },
-  dado: { icon: Hand, tint: "text-violet-400 bg-violet-500/10 border-violet-500/30", maxWin: "×48,5" },
-  tictactoe: { icon: Grid3x3, tint: "text-sky-400 bg-sky-500/10 border-sky-500/30", maxWin: "×2,2" },
-  ppt: { icon: Coins, tint: "text-orange-400 bg-orange-500/10 border-orange-500/30", maxWin: "×1,9" },
+  moneda: { icon: Coins, tint: "text-gold bg-amber-500/10 border-amber-500/30", maxWin: "×1,9" },
+  dado: { icon: Hand, tint: "text-violet-400 bg-violet-500/10 border-violet-500/30", maxWin: "×47,5" },
+  tictactoe: { icon: Grid3x3, tint: "text-sky-400 bg-sky-500/10 border-sky-500/30", maxWin: "×2" },
+  ppt: { icon: Coins, tint: "text-orange-400 bg-orange-500/10 border-orange-500/30", maxWin: "×1,85" },
   ruleta: { icon: CircleDot, tint: "text-red-400 bg-red-500/10 border-red-500/30", maxWin: "×36" },
-  tragamonedas: { icon: Coins, tint: "text-pink-400 bg-pink-500/10 border-pink-500/30", maxWin: "×50" },
-  rueda: { icon: FerrisWheel, tint: "text-gold bg-amber-500/10 border-amber-500/30", maxWin: "×5" },
-  plinko: { icon: Triangle, tint: "text-lime-400 bg-lime-500/10 border-lime-500/30", maxWin: "×100" },
+  tragamonedas: { icon: Coins, tint: "text-pink-400 bg-pink-500/10 border-pink-500/30", maxWin: "×30" },
+  rueda: { icon: FerrisWheel, tint: "text-gold bg-amber-500/10 border-amber-500/30", maxWin: "×4" },
+  plinko: { icon: Triangle, tint: "text-lime-400 bg-lime-500/10 border-lime-500/30", maxWin: "×90" },
   bacara: { icon: Club, tint: "text-violet-400 bg-violet-500/10 border-violet-500/30", maxWin: "×9" },
   rasca: { icon: Gift, tint: "text-pink-400 bg-pink-500/10 border-pink-500/30", maxWin: "×20" },
-  cartaalta: { icon: Swords, tint: "text-rose-400 bg-rose-500/10 border-rose-500/30", maxWin: "×2,05" },
-  mayormenor: { icon: ArrowUpDown, tint: "text-teal-400 bg-teal-500/10 border-teal-500/30", maxWin: "×12,61" },
+  cartaalta: { icon: Swords, tint: "text-rose-400 bg-rose-500/10 border-rose-500/30", maxWin: "×1,9" },
+  mayormenor: { icon: ArrowUpDown, tint: "text-teal-400 bg-teal-500/10 border-teal-500/30", maxWin: "×10" },
   blackjack: { icon: Spade, tint: "text-zinc-200 bg-zinc-500/10 border-zinc-400/30", maxWin: "×2,5" },
 };
 

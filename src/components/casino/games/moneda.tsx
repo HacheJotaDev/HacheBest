@@ -12,7 +12,7 @@ import { toast } from "sonner";
 
 type Pick = "cara" | "cruz";
 
-/** CARA o CRUZ — moneda al aire que paga ×1,95 */
+/** CARA o CRUZ — moneda al aire que paga ×1,9 */
 export function MonedaGame() {
   const play = useCasino((s) => s.play);
   const user = useCasino((s) => s.user);
@@ -151,7 +151,7 @@ export function MonedaGame() {
             {busy ? "Lanzando…" : "Lanzar moneda"}
           </Button>
           <p className="text-xs text-muted-foreground">
-            Acertar el lado pag <strong className="text-gold">×1,95</strong> tu apuesta.
+            Acertar el lado pag <strong className="text-gold">×1,9</strong> tu apuesta.
           </p>
         </div>
       </aside>

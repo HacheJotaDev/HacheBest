@@ -18,19 +18,22 @@ import {
 // gana → la casa paga desde sus fondos. Si los fondos llegan a 0,
 // el casino se cierra hasta que el dueño recargue desde /admin.
 //
-// Mecánica 50/50: en los juegos parejos (par/impar, moneda, PPT,
+// Mecánica de la casa: en los juegos parejos (par/impar, moneda, PPT,
 // carta más alta…) la casa decide ANTES del sorteo si el usuario
-// gana, con una probabilidad base del 50 % (configurable en /admin).
+// gana, con una probabilidad base del 45 % (configurable en /admin).
+// Casino de verdad: la ventaja matemática SIEMPRE es de la casa.
 //
 // Protección de la casa: si la banca baja del capital puesto
 // (déficit), automáticamente:
-//   · baja la probabilidad de victoria del usuario (hasta 38 %)
+//   · baja la probabilidad de victoria del usuario (hasta 35 %)
 //   · sube la ventaja de los juegos de azar puro (dado, mayor/menor…)
 //     hasta +12 puntos
 //   · la IA del 3 en raya juega casi perfecta
 //
 // Cobertura de apuestas: la casa nunca acepta una apuesta cuyo peor
-// premio no pueda pagar con sus fondos → límite dinámico por juego.
+// premio no pueda pagar con sus fondos y SIEMPRE conserva una reserva
+// del 25 % de la banca (como un casino real: nunca se lo juega todo
+// a un solo premio) → límite dinámico por juego.
 // ─────────────────────────────────────────────────────────────
 
 const KEY_WIN = "houseUserWinPercent";
@@ -52,9 +55,10 @@ export interface HouseSettings {
 }
 
 export function getHouseSettings(): HouseSettings {
-  const raw = Number(getSetting(KEY_WIN) ?? "50");
+  // Base del usuario: 45 % (casino de verdad: la casa tiene ventaja)
+  const raw = Number(getSetting(KEY_WIN) ?? "45");
   const userWinPercent =
-    Number.isFinite(raw) && raw > 0 ? Math.min(70, Math.max(30, raw)) : 50;
+    Number.isFinite(raw) && raw > 0 ? Math.min(70, Math.max(25, raw)) : 45;
   return {
     userWinPercent,
     protection: (getSetting(KEY_PROTECTION) ?? "true") !== "false",
@@ -64,7 +68,7 @@ export function getHouseSettings(): HouseSettings {
 export function setHouseSettings(patch: Partial<HouseSettings>): HouseSettings {
   if (patch.userWinPercent !== undefined) {
     const v = Math.round(Number(patch.userWinPercent));
-    if (Number.isFinite(v)) setSetting(KEY_WIN, String(Math.min(70, Math.max(30, v))));
+    if (Number.isFinite(v)) setSetting(KEY_WIN, String(Math.min(70, Math.max(25, v))));
   }
   if (patch.protection !== undefined) {
     setSetting(KEY_PROTECTION, patch.protection ? "true" : "false");
@@ -156,6 +160,9 @@ export function recapitalizeHouse(amount: number): { ok: boolean; error?: string
 
 // ── Cobertura de apuestas (la casa no apuesta más de lo que puede pagar) ──
 
+/** Reserva de la banca: un casino real nunca arriesga el 100 % en un premio */
+export const HOUSE_RESERVE = 0.25;
+
 /** Cobertura máxima de apuesta para un multiplier de peor caso dado */
 export function coveredMaxBet(worstCaseMultiplier: number): number {
   const b = getHouseBank();
@@ -164,8 +171,10 @@ export function coveredMaxBet(worstCaseMultiplier: number): number {
     // Empates/prácticamente sin riesgo de premio alto: manda el máximo del juego
     return Number.MAX_SAFE_INTEGER;
   }
-  // peor caso: fondos + apuesta − apuesta×mult ≥ 0  →  apuesta ≤ fondos/(mult−1)
-  return Math.floor((b.funds / (worstCaseMultiplier - 1)) * 100) / 100;
+  // Peor caso dejando la reserva: fondos×(1−reserva) + apuesta − apuesta×mult ≥ 0
+  //  → apuesta ≤ fondos×(1−reserva)/(mult−1)
+  const usable = b.funds * (1 - HOUSE_RESERVE);
+  return Math.floor((usable / (worstCaseMultiplier - 1)) * 100) / 100;
 }
 
 interface CeilingCtx {
@@ -186,15 +195,15 @@ export function betCeiling(game: string, ctx: CeilingCtx = {}): number {
     case "parimpar":
     case "moneda":
     case "cartaalta":
-      return n("multiplier", 1.95) || n("winMultiplier", 1.95);
+      return n("multiplier", 1.9) || n("winMultiplier", 1.9);
     case "ppt":
-      return n("winMultiplier", 1.9);
+      return n("winMultiplier", 1.85);
     case "exacto":
       return n("multiplier", 36);
     case "dado": {
       const target = Math.min(98, Math.max(2, Number(ctx.extra?.target ?? 50)));
       const chance = Math.max(2, ctx.betType === "menor" ? target : 100 - target);
-      return (100 - n("houseEdge", 1)) / chance;
+      return (100 - n("houseEdge", 5)) / chance;
     }
     case "ruleta": {
       const bt = ctx.betType ?? "";
@@ -203,9 +212,9 @@ export function betCeiling(game: string, ctx: CeilingCtx = {}): number {
       return n("doble", 2);
     }
     case "tragamonedas":
-      return 50; // triple 7️⃣
+      return 30; // triple 7️⃣ / diamante (tabla endurecida)
     case "rueda":
-      return 5; // mejor segmento
+      return 4; // mejor segmento
     case "bacara": {
       const bt = ctx.betType ?? "jugador";
       if (bt === "empate") return n("empate", 9);
@@ -216,10 +225,10 @@ export function betCeiling(game: string, ctx: CeilingCtx = {}): number {
       return 20; // premio máximo de la tarjeta
     case "plinko": {
       const risk = ctx.extra?.risk === "alto" ? "alto" : ctx.extra?.risk === "bajo" ? "bajo" : "medio";
-      return risk === "alto" ? 100 : risk === "bajo" ? 9 : 25; // extremos de cada tabla
+      return risk === "alto" ? 90 : risk === "bajo" ? 8 : 22; // extremos de cada tabla
     }
     case "tictactoe":
-      return n("winMultiplier", 2.5);
+      return n("winMultiplier", 2);
     case "blackjack":
       // Se cubre también el doble: 2 × pago de blackjack
       return n("blackjackPays", 2.5) * 2;
@@ -236,9 +245,9 @@ export function representativeCeiling(game: string): number {
     case "ruleta":
       return 2; // lo típico: apuestas a color/par/etc.
     case "dado":
-      return (100 - 3) / 50; // objetivo medio ≈ 1.94×
+      return (100 - 5) / 50; // objetivo medio ≈ 1.9×
     case "plinko":
-      return 25; // riesgo medio
+      return 22; // riesgo medio
     case "bacara":
       return 2; // apuesta típica a jugador/banca
     case "rasca":
@@ -260,10 +269,10 @@ export function houseDeficit(): number {
   return Math.max(0, Math.round((b.capital - b.funds) * 100) / 100);
 }
 
-/** Castigo dinámico [0…0.12] según el déficit de la banca */
+/** Castigo dinámico [0…0.12] según el déficit de la banca (máximo con 48 de déficit) */
 export function housePenalty(): number {
   if (!getHouseSettings().protection) return 0;
-  return Math.min(0.12, houseDeficit() / 500);
+  return Math.min(0.12, houseDeficit() / 400);
 }
 
 /** Presión sobre la IA [0…1]: a menos fondos, juega mejor el 3 en raya */
@@ -273,14 +282,14 @@ export function housePressure(): number {
 
 /**
  * Probabilidad efectiva de victoria del usuario en juegos parejos.
- * Base 50 % · si la banca está en déficit baja hasta 38 %.
+ * Base 45 % · si la banca está en déficit baja hasta 35 %.
  */
 export function effectiveUserWinRate(): number {
   const { userWinPercent } = getHouseSettings();
-  return Math.max(0.38, Math.min(0.7, userWinPercent / 100 - housePenalty()));
+  return Math.max(0.35, Math.min(0.7, userWinPercent / 100 - housePenalty()));
 }
 
-/** La casa decide de antemano si el usuario gana esta ronda (50/50) */
+/** La casa decide de antemano si el usuario gana esta ronda */
 export function rollUserWin(): boolean {
   return randomInt(0, 10_000) / 10_000 < effectiveUserWinRate();
 }
