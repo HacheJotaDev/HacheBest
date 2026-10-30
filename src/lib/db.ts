@@ -54,16 +54,56 @@ export interface GameConfigRecord {
   configJson: string;
 }
 
+export interface HouseWithdrawal {
+  id: string;
+  amount: number;
+  at: string;
+}
+
+/**
+ * Banca de la casa: dinero real (demo) que la casa usa para pagar apuestas.
+ *  · funds     — fondos disponibles ahora mismo para pagar premios
+ *  · capital   — capital total puesto por el dueño (100 USD inicial + recargas)
+ *  · withdrawn — total retirado por el dueño (solo ganancias)
+ * Identidad contable: funds = capital + beneficioNeto - withdrawn
+ */
+export interface HouseBank {
+  funds: number;
+  capital: number;
+  withdrawn: number;
+  withdrawals: HouseWithdrawal[];
+}
+
 interface DBData {
   version: 1;
   users: UserRecord[];
   bets: BetRecord[];
   gameConfigs: GameConfigRecord[];
   settings: Record<string, string>;
+  house: HouseBank;
+}
+
+/**
+ * Banca nueva (o migrada): la casa empieza con 100 USD para pagar apuestas.
+ * Si ya había historial, los beneficios pasados se suman a los fondos.
+ */
+function initialHouse(bets: BetRecord[]): HouseBank {
+  let profit = 0;
+  for (const b of bets) {
+    if (b.outcome === "pending") continue;
+    profit += b.amount - b.payout;
+  }
+  profit = Math.round(profit * 100) / 100;
+  return {
+    funds: Math.round((100 + Math.max(0, profit)) * 100) / 100,
+    capital: Math.round((100 + Math.max(0, -profit)) * 100) / 100,
+    withdrawn: 0,
+    withdrawals: [],
+  };
 }
 
 function emptyData(): DBData {
-  return { version: 1, users: [], bets: [], gameConfigs: [], settings: {} };
+  return { version: 1, users: [], bets: [], gameConfigs: [], settings: {}, house: initialHouse([]) };
 }
 
 // ── Ubicación del archivo de datos ───────────────────────────
@@ -113,6 +153,15 @@ function loadData(): DBData {
         bets: parsed.bets,
         gameConfigs: Array.isArray(parsed.gameConfigs) ? parsed.gameConfigs : [],
         settings: parsed.settings ?? {},
+        house:
+          parsed.house && Number.isFinite(parsed.house.funds)
+            ? {
+                funds: parsed.house.funds,
+                capital: Number.isFinite(parsed.house.capital) ? parsed.house.capital : parsed.house.funds,
+                withdrawn: Number.isFinite(parsed.house.withdrawn) ? parsed.house.withdrawn : 0,
+                withdrawals: Array.isArray(parsed.house.withdrawals) ? parsed.house.withdrawals : [],
+              }
+            : initialHouse(parsed.bets), // migración v3: banca con 100 USD de base
       };
     }
   } catch {
@@ -367,6 +416,20 @@ export function updateGameConfig(
   Object.assign(cfg, patch);
   scheduleSave();
   return cfg;
+}
+
+// ── Banca de la casa ─────────────────────────────────────────
+
+export function getHouseBank(): HouseBank {
+  return loadData().house;
+}
+
+/** Mutación atómica de la banca (el mutador no debe contener awaits) */
+export function mutateHouseBank(mutator: (h: HouseBank) => void): HouseBank {
+  const bank = loadData().house;
+  mutator(bank);
+  scheduleSave();
+  return bank;
 }
 
 // ── Ajustes (settings clave-valor) ───────────────────────────

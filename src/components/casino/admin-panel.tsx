@@ -14,6 +14,7 @@ import {
   Settings2,
   Shield,
   Users,
+  Wallet,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -56,6 +57,18 @@ interface HouseInfo {
   houseProfit: number;
   deficit: number;
   effectiveWinRate: number;
+  bank?: BankInfo;
+}
+
+/** Banca de la casa: fondos reales que pagan las apuestas */
+interface BankInfo {
+  fondos: number;
+  capital: number;
+  retirado: number;
+  gananciaNeta: number;
+  retirable: number;
+  abierta: boolean;
+  withdrawals: Array<{ id: string; amount: number; at: string }>;
 }
 
 interface BigWin {
@@ -251,6 +264,18 @@ function StatsTab({ adminKey, active }: { adminKey: string; active: boolean }) {
     { label: "Apuestas", value: stats.totalBets.toLocaleString("es-ES"), sub: `Media ${fmtUSD(stats.avgBet)}` },
     { label: "Total apostado", value: fmtUSD(stats.totalWagered), sub: `Pagado: ${fmtUSD(stats.totalPayout)}` },
     { label: "Beneficio de la casa", value: fmtUSD(stats.houseProfit), sub: "", highlight: stats.houseProfit >= 0 ? "text-win" : "text-lose" },
+    {
+      label: "Fondos de la banca",
+      value: house?.bank ? fmtUSD(house.bank.fondos) : "—",
+      sub: house?.bank ? `Capital ${fmtUSD(house.bank.capital)} · ${house.bank.abierta ? "casino abierto" : "CASINO CERRADO"}` : "",
+      highlight: (house?.bank?.fondos ?? 0) > 0 ? "text-gold" : "text-lose",
+    },
+    {
+      label: "Retirable (ganancias)",
+      value: house?.bank ? fmtUSD(house.bank.retirable) : "—",
+      sub: house?.bank ? `Ya retirado: ${fmtUSD(house.bank.retirado)}` : "",
+      highlight: "text-win",
+    },
   ];
 
   return (
@@ -684,17 +709,23 @@ function HouseForm({ adminKey }: { adminKey: string }) {
   const [win, setWin] = useState(50);
   const [prot, setProt] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [retiro, setRetiro] = useState("");
+  const [recarga, setRecarga] = useState("");
+  const [busyBank, setBusyBank] = useState<"retirar" | "recapitalizar" | null>(null);
+
+  const refresh = useCallback(async () => {
+    const res = await api<HouseInfo>("/api/admin/house", { adminKey });
+    if (res.ok) {
+      setInfo(res.data);
+      setWin(res.data.settings.userWinPercent);
+      setProt(res.data.settings.protection);
+    }
+  }, [adminKey]);
 
   useEffect(() => {
-    void (async () => {
-      const res = await api<HouseInfo>("/api/admin/house", { adminKey });
-      if (res.ok) {
-        setInfo(res.data);
-        setWin(res.data.settings.userWinPercent);
-        setProt(res.data.settings.protection);
-      }
-    })();
-  }, [adminKey]);
+    const t = setTimeout(() => void refresh(), 0);
+    return () => clearTimeout(t);
+  }, [refresh]);
 
   const save = async () => {
     setBusy(true);
@@ -712,6 +743,28 @@ function HouseForm({ adminKey }: { adminKey: string }) {
     setWin(res.data.settings.userWinPercent);
     setProt(res.data.settings.protection);
     toast.success("Cerebro de la casa actualizado");
+  };
+
+  const bankAction = async (action: "retirar" | "recapitalizar", amount: number) => {
+    setBusyBank(action);
+    const res = await api<{ ok: boolean; bank: BankInfo; mensaje: string }>("/api/admin/house/bank", {
+      method: "POST",
+      body: { action, amount },
+      adminKey,
+    });
+    setBusyBank(null);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    setInfo((prev) => (prev ? { ...prev, bank: res.data.bank } : prev));
+    if (action === "retirar") {
+      toast.success(res.data.mensaje);
+      setRetiro("");
+    } else {
+      toast.success(res.data.mensaje);
+      setRecarga("");
+    }
   };
 
   return (
@@ -737,6 +790,137 @@ function HouseForm({ adminKey }: { adminKey: string }) {
           <p className="font-extrabold tabular text-gold">{info?.effectiveWinRate ?? win}%</p>
         </div>
       </div>
+
+      {info?.bank && (
+        <div className="space-y-3 rounded-lg border border-gold/30 bg-gold/5 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Wallet className="size-4 text-gold" aria-hidden />
+              <p className="text-sm font-bold">Banca de la casa</p>
+            </div>
+            <Badge
+              variant="outline"
+              className={
+                info.bank.abierta
+                  ? "border-win/50 text-win"
+                  : "border-lose/60 bg-lose/10 text-lose animate-pulse"
+              }
+            >
+              {info.bank.abierta ? "CASINO ABIERTO" : "CASINO CERRADO · SIN FONDOS"}
+            </Badge>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+            <div className="rounded-md border border-border/60 bg-background/50 p-2">
+              <p className="text-[11px] text-muted-foreground">Fondos</p>
+              <p className={`font-extrabold tabular ${info.bank.fondos > 0 ? "text-gold" : "text-lose"}`}>
+                {fmtUSD(info.bank.fondos)}
+              </p>
+            </div>
+            <div className="rounded-md border border-border/60 bg-background/50 p-2">
+              <p className="text-[11px] text-muted-foreground">Capital puesto</p>
+              <p className="font-extrabold tabular">{fmtUSD(info.bank.capital)}</p>
+            </div>
+            <div className="rounded-md border border-border/60 bg-background/50 p-2">
+              <p className="text-[11px] text-muted-foreground">Ganancia neta</p>
+              <p className={`font-extrabold tabular ${info.bank.gananciaNeta >= 0 ? "text-win" : "text-lose"}`}>
+                {fmtUSD(info.bank.gananciaNeta)}
+              </p>
+            </div>
+            <div className="rounded-md border border-border/60 bg-background/50 p-2">
+              <p className="text-[11px] text-muted-foreground">Retirable</p>
+              <p className="font-extrabold tabular text-win">{fmtUSD(info.bank.retirable)}</p>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-2 rounded-md border border-border/60 bg-background/50 p-3">
+              <Label htmlFor="retiro-amt" className="text-xs">
+                Retirar ganancias (máx. {fmtUSD(info.bank.retirable)})
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  id="retiro-amt"
+                  type="number"
+                  min={0}
+                  max={info.bank.retirable}
+                  step="0.01"
+                  placeholder="0.00"
+                  value={retiro}
+                  onChange={(e) => setRetiro(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="shrink-0"
+                  disabled={info.bank.retirable <= 0}
+                  onClick={() => setRetiro(info.bank.retirable.toFixed(2))}
+                >
+                  Todo
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="shrink-0 gap-1"
+                  disabled={busyBank !== null || !(Number(retiro) > 0)}
+                  onClick={() => void bankAction("retirar", Number(retiro))}
+                >
+                  {busyBank === "retirar" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Wallet className="size-4" aria-hidden />}
+                  Retirar
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                El capital ({fmtUSD(info.bank.capital)}) queda en la banca para pagar apuestas.
+              </p>
+            </div>
+
+            <div className="space-y-2 rounded-md border border-border/60 bg-background/50 p-3">
+              <Label htmlFor="recarga-amt" className="text-xs">
+                Recargar banca (capital del dueño)
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  id="recarga-amt"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  placeholder="100.00"
+                  value={recarga}
+                  onChange={(e) => setRecarga(e.target.value)}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  className="shrink-0 gap-1"
+                  disabled={busyBank !== null || !(Number(recarga) > 0)}
+                  onClick={() => void bankAction("recapitalizar", Number(recarga))}
+                >
+                  {busyBank === "recapitalizar" ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Coins className="size-4" aria-hidden />}
+                  Recargar
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Con más fondos suben los límites de apuesta de todos los juegos.
+              </p>
+            </div>
+          </div>
+
+          {info.bank.withdrawals.length > 0 && (
+            <div className="rounded-md border border-border/60 bg-background/50 p-2">
+              <p className="px-1 pb-1 text-[11px] font-bold uppercase text-muted-foreground">Últimas retiradas</p>
+              <ScrollArea className="max-h-28">
+                {info.bank.withdrawals.slice(0, 8).map((w) => (
+                  <div key={w.id} className="flex items-center justify-between px-1 py-0.5 text-xs">
+                    <span className="tabular font-bold text-win">+{fmtUSD(w.amount)}</span>
+                    <span className="text-muted-foreground">{fmtTime(w.at)}</span>
+                  </div>
+                ))}
+              </ScrollArea>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">

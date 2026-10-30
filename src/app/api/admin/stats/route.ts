@@ -5,6 +5,7 @@ import { ROUND2 } from "@/lib/games";
 import {
   effectiveUserWinRate,
   getHouseSettings,
+  houseBankSnapshot,
   houseDeficit,
   houseProfit,
 } from "@/lib/house";
@@ -34,6 +35,7 @@ export async function GET(req: NextRequest) {
         profit: ROUND2(houseProfit()),
         deficit: ROUND2(houseDeficit()),
         effectiveWinRate: Math.round(effectiveUserWinRate() * 1000) / 10,
+        bank: houseBankSnapshot(),
       },
       bigWins: topWins(10).map((b) => ({
         id: b.id,

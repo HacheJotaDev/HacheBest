@@ -68,3 +68,4 @@ agent-ctx/
 # datos del casino (store JSON)
 /db/data.json
 /db/*.tmp
+tool-results/

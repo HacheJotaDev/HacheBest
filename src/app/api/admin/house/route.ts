@@ -3,6 +3,7 @@ import { checkAdmin, unauthorized } from "@/lib/admin";
 import {
   effectiveUserWinRate,
   getHouseSettings,
+  houseBankSnapshot,
   houseDeficit,
   houseProfit,
   setHouseSettings,
@@ -17,6 +18,8 @@ function snapshot() {
     deficit: ROUND2(houseDeficit()),
     /** Probabilidad efectiva de victoria del usuario en juegos parejos (%) */
     effectiveWinRate: Math.round(effectiveUserWinRate() * 1000) / 10,
+    /** Banca de la casa: fondos, capital, retirable, retiradas… */
+    bank: houseBankSnapshot(),
   };
 }
 

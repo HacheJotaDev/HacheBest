@@ -11,6 +11,7 @@ import {
   FerrisWheel,
   Grid3x3,
   Hand,
+  Lock,
   Spade,
   Swords,
   Target,
@@ -33,7 +34,7 @@ const GAME_META: Record<string, { icon: React.ElementType; tint: string; maxWin:
   ruleta: { icon: CircleDot, tint: "text-red-400 bg-red-500/10 border-red-500/30", maxWin: "×36" },
   tragamonedas: { icon: Coins, tint: "text-pink-400 bg-pink-500/10 border-pink-500/30", maxWin: "×50" },
   rueda: { icon: FerrisWheel, tint: "text-gold bg-amber-500/10 border-amber-500/30", maxWin: "×5" },
-  plinko: { icon: Triangle, tint: "text-lime-400 bg-lime-500/10 border-lime-500/30", maxWin: "×170" },
+  plinko: { icon: Triangle, tint: "text-lime-400 bg-lime-500/10 border-lime-500/30", maxWin: "×100" },
   cartaalta: { icon: Swords, tint: "text-rose-400 bg-rose-500/10 border-rose-500/30", maxWin: "×2,05" },
   mayormenor: { icon: ArrowUpDown, tint: "text-teal-400 bg-teal-500/10 border-teal-500/30", maxWin: "×12,87" },
   blackjack: { icon: Spade, tint: "text-zinc-200 bg-zinc-500/10 border-zinc-400/30", maxWin: "×2,5" },
@@ -44,6 +45,7 @@ const GAME_META: Record<string, { icon: React.ElementType; tint: string; maxWin:
 /** Lobby con las tarjetas de todos los juegos */
 export function Lobby() {
   const gamesConfig = useCasino((s) => s.gamesConfig);
+  const abierta = useCasino((s) => s.abierta);
   const setActiveGame = useCasino((s) => s.setActiveGame);
   const ordered = [
     "crash",
@@ -74,6 +76,24 @@ export function Lobby() {
           segura en el servidor.
         </p>
       </div>
+
+      {!abierta && (
+        <div
+          role="alert"
+          className="casino-card mb-5 flex items-start gap-3 border-lose/50 bg-lose/10 p-4"
+        >
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-lose/40 bg-lose/10">
+            <Lock className="size-5 text-lose" aria-hidden />
+          </span>
+          <div>
+            <p className="font-bold text-lose">Casino cerrado temporalmente</p>
+            <p className="text-sm text-muted-foreground">
+              La banca de la casa se quedó sin fondos para pagar apuestas. En cuanto el
+              administrador la recargue, todos los juegos vuelven a estar disponibles.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {ordered.map((g, i) => {

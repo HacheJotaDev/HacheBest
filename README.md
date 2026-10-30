@@ -18,7 +18,7 @@ Casino de apuestas online en **modo demo**: cada jugador empieza con **1.000 USD
 | Ruleta | Instantáneo | Europea 0-36: plenos, colores, pares, docenas |
 | Tragamonedas | Instantáneo | 3 rodillos, el 7 paga 50x, dos cerezas ×2 (RTP ≈ 91%) |
 | Rueda de la Fortuna | Instantáneo | 26 segmentos, hasta 5x |
-| Plinko | Instantáneo | 12 filas, riesgo bajo/medio/alto (hasta ×140) |
+| Plinko | Instantáneo | 12 filas, riesgo bajo/medio/alto (hasta ×100) |
 | Carta Más Alta | Instantáneo | Tu carta contra la casa, 50/50 sin empates (1,95x) |
 | Mayor o Menor | Multi-fase | Cadena de cartas, retírate cuando quieras |
 | Blackjack | Multi-fase | Pedir, plantarse y doblar. BJ paga 2,5x |
@@ -75,7 +75,8 @@ Casino de apuestas online en **modo demo**: cada jugador empieza con **1.000 USD
 | `GET/PUT /api/admin/games` | Config de juegos: activar/desactivar, límites, multiplicadores |
 | `GET/PATCH /api/admin/users` | Banear, reactivar, fijar saldo, resetear |
 | `GET/PUT /api/admin/settings` | Cambiar contraseña del panel |
-| `GET/PUT /api/admin/house` | **El cerebro de la casa**: prob. 50/50 del usuario y protección de la banca |
+| `GET/PUT /api/admin/house` | **El cerebro de la casa**: prob. 50/50 del usuario, protección de la banca y estado de la banca (`bank`) |
+| `POST /api/admin/house/bank` | **Banca de la casa**: `{ action: "retirar"\|"recapitalizar", amount }` |
 
 > Las rutas admin requieren la cabecera `x-admin-key` con la contraseña.
 
@@ -86,7 +87,7 @@ Casino de apuestas online en **modo demo**: cada jugador empieza con **1.000 USD
 La casa **no juega a la suerte**: decide el resultado **antes** del sorteo.
 
 - **Juegos parejos** (Par o Impar, Cara o Cruz, PPT, Carta Más Alta): el usuario gana con una probabilidad base del **50 %** (50 % para la casa, 50 % para el usuario) y los pagos quedan por debajo del valor justo (1,9x–1,95x), así la casa siempre mantiene una ventaja del 2,5–5 %.
-- **Protección de la banca** (activada por defecto): si la casa acumula pérdidas, automáticamente endurece los juegos:
+- **Protección de la banca** (activada por defecto): si los **fondos de la banca** bajan del capital puesto, automáticamente endurece los juegos:
   - baja la probabilidad del usuario hasta un mínimo de **38 %**,
   - sube la ventaja en Dado, Mayor/Menor, Mines y Crash (hasta **+12 puntos**),
   - la IA del 3 en Raya pasa a jugar casi perfecta.
@@ -94,12 +95,27 @@ La casa **no juega a la suerte**: decide el resultado **antes** del sorteo.
 
 ---
 
+## 💰 Banca de la casa — la casa juega con 100 USD
+
+La economía es la de un casino de verdad:
+
+- **La banca arranca con 100 USD** (`funds`): es el dinero que la casa usa para **pagar los premios**. Los 1.000 USD de cada jugador son de los jugadores; ellos los gastan apostando.
+- **Cada apuesta liquidada mueve la banca**: el jugador pierde → la banca cobra su apuesta; el jugador gana → la banca paga el premio desde sus fondos. Empate/reembolso → la banca ni gana ni pierde.
+- **Cobertura obligatoria**: la casa nunca acepta una apuesta cuyo peor premio no pueda pagar. Con 100 USD de fondos, los límites se ajustan solos por juego (p. ej. pleno de ruleta ≈ 2,86 USD, apuestas parejas ≈ 100 USD). A medida que la banca gana, los límites suben solos.
+- **Casino cerrado**: si los fondos llegan a 0, todos los juegos se detienen y el lobby muestra el aviso hasta que el dueño recargue la banca desde `/admin`.
+- **Ganancias y retiros** (pestaña *Ajustes → La Casa* en el panel):
+  - **Ganancia neta** = fondos + retirado − capital.
+  - **Retirable** = solo las ganancias; el capital queda siempre en la banca para pagar apuestas.
+  - **Retirar**: el dueño saca sus ganancias (queda registrado en el historial de retiradas).
+  - **Recargar**: el dueño añade capital para ampliar los fondos y, con ellos, los límites de apuesta.
+- **Protección conectada a la banca**: si los fondos bajan del capital puesto, la casa endurece automáticamente los juegos (ver sección siguiente) para no quebrar.
+
 ## 🔐 Panel admin (oculto)
 
 - **URL:** `dominio.com/admin` — **no aparece en ningún sitio del casino**: sin enlaces, sin bots (`robots.ts` lo bloquea). Solo se entra escribiendo la URL.
 - **Contraseña por defecto:** `admin123`
 - Se puede cambiar desde el propio panel (pestaña *Ajustes*) o con la variable de entorno `ADMIN_PASSWORD`
-- Funciones: estadísticas del casino, feed de apuestas en vivo, gestión de usuarios (banear, saldo, reset), configuración por juego (on/off, apuesta mín/máx, multiplicadores), cambio de contraseña
+- Funciones: estadísticas del casino, feed de apuestas en vivo, gestión de usuarios (banear, saldo, reset), configuración por juego (on/off, apuesta mín/máx, multiplicadores), **banca de la casa (fondos, retirar ganancias, recargar)**, cambio de contraseña
 
 ---
 

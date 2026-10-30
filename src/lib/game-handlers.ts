@@ -20,6 +20,7 @@ import {
   type GameId,
   type PlayResult,
 } from "@/lib/games";
+import { betCeiling, coveredMaxBet, houseIsOpen, houseSettle } from "@/lib/house";
 import {
   actSession,
   blackjackNaturals,
@@ -56,6 +57,35 @@ interface SessionBody {
 
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 
+/**
+ * Comprobación de BANCA: ¿puede la casa aceptar esta apuesta?
+ *  · Si los fondos llegaron a 0 → casino cerrado.
+ *  · Si el peor premio de esta apuesta supera a los fondos → límite dinámico.
+ */
+function checkHouseBank(
+  game: string,
+  amt: number,
+  betType?: string,
+  extra?: Record<string, unknown>,
+  cfg?: Record<string, number | boolean>,
+): Response | null {
+  if (!houseIsOpen()) {
+    return bad(
+      "El casino está cerrado temporalmente: la banca no tiene fondos para pagar apuestas. El administrador puede recargarla desde /admin.",
+      503,
+    );
+  }
+  const ceiling = betCeiling(game, { betType, extra, cfg });
+  const covered = coveredMaxBet(ceiling);
+  if (Number.isFinite(covered) && amt > covered + 1e-9) {
+    return bad(
+      `La banca solo cubre hasta ${covered.toFixed(2)} USD en este juego por ahora (fondos limitados).`,
+      409,
+    );
+  }
+  return null;
+}
+
 type UserCheck = { ok: false; error: Response } | { ok: true; user: UserRow };
 
 type UserRow = NonNullable<ReturnType<typeof getUser>>;
@@ -83,6 +113,8 @@ function applySettlementToUser(userId: string, amount: number, s: { outcome: str
       u.totalPayout = ROUND2(u.totalPayout + s.payout);
     }
   });
+  // La banca absorbe el resultado: cobra la apuesta y paga el premio
+  houseSettle(amount, s.payout);
 }
 
 /** Liquida una apuesta pending (juegos de sesión) */
@@ -118,6 +150,8 @@ function settlePendingBet(
     }
     if (s.payout > 0) u.balance = ROUND2(u.balance + s.payout);
   });
+  // La banca absorbe la ronda completa (apuesta total incluido doble − premio)
+  houseSettle(effAmount, s.payout);
 }
 
 // ── JUEGOS INSTANTÁNEOS ──────────────────────────────────────
@@ -143,6 +177,9 @@ export async function handleInstantGame(game: GameId, req: NextRequest): Promise
     if (amt < config.minBet) return bad(`Apuesta mínima: ${config.minBet.toFixed(2)} USD`);
     if (amt > config.maxBet) return bad(`Apuesta máxima: ${config.maxBet.toFixed(2)} USD`);
     if (user.balance < amt) return bad("Saldo insuficiente");
+
+    const bankError = checkHouseBank(game, amt, betType, extra, parseConfig(config.configJson));
+    if (bankError) return bankError;
 
     const betError = validateBet(game, betType, extra);
     if (betError) return bad(betError);
@@ -205,6 +242,9 @@ export async function handleSessionGame(game: SessionGameId, req: NextRequest): 
       if (amt < config.minBet) return bad(`Apuesta mínima: ${config.minBet.toFixed(2)} USD`);
       if (amt > config.maxBet) return bad(`Apuesta máxima: ${config.maxBet.toFixed(2)} USD`);
       if (user.balance < amt) return bad("Saldo insuficiente");
+
+      const bankError = checkHouseBank(game, amt, undefined, extra, cfg);
+      if (bankError) return bankError;
 
       // Estado inicial ANTES de tocar datos (puede fallar por parámetros)
       const started = startSession(game, amt, extra, cfg);
@@ -357,6 +397,8 @@ function finishTtt(
     b.profit = ROUND2(r.payout - amount);
     b.resultJson = JSON.stringify(r.resultJson);
   });
+  // La banca absorbe el resultado de la partida
+  houseSettle(amount, r.payout);
   updateUser(userId, (u) => {
     if (r.outcome === "win") {
       u.winsCount += 1;
@@ -409,6 +451,9 @@ export async function handleTictactoe(req: NextRequest): Promise<Response> {
       if (amt < config.minBet) return bad(`Apuesta mínima: ${config.minBet.toFixed(2)} USD`);
       if (amt > config.maxBet) return bad(`Apuesta máxima: ${config.maxBet.toFixed(2)} USD`);
       if (user.balance < amt) return bad("Saldo insuficiente");
+
+      const bankError = checkHouseBank("tictactoe", amt, "tictactoe", undefined, cfg);
+      if (bankError) return bankError;
 
       // Cancela partidas pendientes anteriores (reembolso)
       const pending = findPendingBet(user.id, "tictactoe");

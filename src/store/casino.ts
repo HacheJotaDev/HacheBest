@@ -27,6 +27,8 @@ export interface GameConfigPublic {
   minBet: number;
   maxBet: number;
   configJson: string;
+  /** Techo de multiplier de la apuesta típica (informativo) */
+  techo?: number;
 }
 
 export interface BetRecord {
@@ -117,6 +119,8 @@ interface CasinoState {
   activeGame: string | null;
   gamesConfig: GameConfigPublic[];
   bets: BetRecord[];
+  /** ¿Está abierta la banca de la casa para pagar apuestas? */
+  abierta: boolean;
 
   hydrate: () => Promise<void>;
   login: (username: string) => Promise<{ ok: boolean; error?: string; isNew?: boolean }>;
@@ -162,6 +166,7 @@ export const useCasino = create<CasinoState>((set, get) => ({
   activeGame: null,
   gamesConfig: [],
   bets: [],
+  abierta: true,
 
   hydrate: async () => {
     const session = readSession();
@@ -220,8 +225,10 @@ export const useCasino = create<CasinoState>((set, get) => ({
   setActiveGame: (activeGame) => set({ activeGame }),
 
   loadGames: async () => {
-    const res = await api<{ games: GameConfigPublic[] }>("/api/games");
-    if (res.ok) set({ gamesConfig: res.data.games });
+    const res = await api<{ games: GameConfigPublic[]; abierta?: boolean }>("/api/games");
+    if (res.ok) {
+      set({ gamesConfig: res.data.games, abierta: res.data.abierta !== false });
+    }
   },
 
   refreshBets: async () => {

@@ -332,10 +332,11 @@ function playRueda(ctx: Ctx): PlayResult {
 // ── PLINKO ───────────────────────────────────────────────────
 export const PLINKO_ROWS = 12;
 // RTP ≈ 94 % (bajo) · 93 % (medio) · 91 % (alto)
+// Tope de la tabla alto en 100× para que la banca siempre pueda cubrirlo.
 export const PLINKO_TABLES: Record<"bajo" | "medio" | "alto", number[]> = {
   bajo: [9, 3, 1.6, 1.3, 1.05, 0.9, 0.55, 0.9, 1.05, 1.3, 1.6, 3, 9],
   medio: [25, 8, 3, 1.6, 1, 0.7, 0.4, 0.7, 1, 1.6, 3, 8, 25],
-  alto: [140, 22, 7.2, 1.8, 0.6, 0.25, 0.2, 0.25, 0.6, 1.8, 7.2, 22, 140],
+  alto: [100, 22, 7.2, 1.8, 0.6, 0.25, 0.2, 0.25, 0.6, 1.8, 7.2, 22, 100],
 };
 
 function playPlinko(ctx: Ctx): PlayResult {
