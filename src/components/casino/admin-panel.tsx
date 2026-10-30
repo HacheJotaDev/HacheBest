@@ -855,7 +855,7 @@ function HouseForm({ adminKey }: { adminKey: string }) {
                   variant="secondary"
                   className="shrink-0"
                   disabled={info.bank.retirable <= 0}
-                  onClick={() => setRetiro(info.bank.retirable.toFixed(2))}
+                  onClick={() => setRetiro(info.bank?.retirable.toFixed(2) ?? "0.00")}
                 >
                   Todo
                 </Button>
