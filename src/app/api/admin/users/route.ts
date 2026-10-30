@@ -1,24 +1,19 @@
 import { NextRequest } from "next/server";
-import { db } from "@/lib/db";
 import { checkAdmin, unauthorized } from "@/lib/admin";
+import { getUser, listUsers, updateUser } from "@/lib/db";
 import { ROUND2, STARTING_BALANCE } from "@/lib/games";
 
 /** GET /api/admin/users — lista completa de usuarios */
 export async function GET(req: NextRequest) {
   if (!(await checkAdmin(req))) return unauthorized();
   try {
-    const users = await db.user.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 200,
-    });
-    return Response.json({
-      users: users.map((u) => ({
-        ...u,
-        balance: ROUND2(u.balance),
-        totalWagered: ROUND2(u.totalWagered),
-        totalPayout: ROUND2(u.totalPayout),
-      })),
-    });
+    const users = listUsers(200).map((u) => ({
+      ...u,
+      balance: ROUND2(u.balance),
+      totalWagered: ROUND2(u.totalWagered),
+      totalPayout: ROUND2(u.totalPayout),
+    }));
+    return Response.json({ users });
   } catch (e) {
     console.error("GET /api/admin/users", e);
     return Response.json({ error: "Error interno" }, { status: 500 });
@@ -35,24 +30,26 @@ export async function PATCH(req: NextRequest) {
       value?: number;
     };
     if (!userId || !action) return Response.json({ error: "Faltan parámetros" }, { status: 400 });
-    const user = await db.user.findUnique({ where: { id: userId } });
+    const user = getUser(userId);
     if (!user) return Response.json({ error: "Usuario no encontrado" }, { status: 404 });
 
-    let data: Record<string, number | boolean> = {};
-    if (action === "ban") data = { isBanned: true };
-    else if (action === "unban") data = { isBanned: false };
-    else if (action === "reset") data = { balance: STARTING_BALANCE };
-    else if (action === "setBalance") {
-      const v = ROUND2(Number(value));
-      if (!Number.isFinite(v) || v < 0) {
-        return Response.json({ error: "Saldo inválido" }, { status: 400 });
+    const updated = updateUser(userId, (u) => {
+      if (action === "ban") u.isBanned = true;
+      else if (action === "unban") u.isBanned = false;
+      else if (action === "reset") u.balance = STARTING_BALANCE;
+      else if (action === "setBalance") {
+        const v = ROUND2(Number(value));
+        if (Number.isFinite(v) && v >= 0) u.balance = v;
       }
-      data = { balance: v };
-    }
+    });
 
-    const updated = await db.user.update({ where: { id: userId }, data });
     return Response.json({
-      user: { ...updated, balance: ROUND2(updated.balance), totalWagered: ROUND2(updated.totalWagered), totalPayout: ROUND2(updated.totalPayout) },
+      user: {
+        ...updated,
+        balance: ROUND2(updated?.balance ?? 0),
+        totalWagered: ROUND2(updated?.totalWagered ?? 0),
+        totalPayout: ROUND2(updated?.totalPayout ?? 0),
+      },
     });
   } catch (e) {
     console.error("PATCH /api/admin/users", e);

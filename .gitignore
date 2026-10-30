@@ -65,3 +65,6 @@ server.log
 /mini-services/
 Caddyfile
 agent-ctx/
+# datos del casino (store JSON)
+/db/data.json
+/db/*.tmp

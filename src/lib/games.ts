@@ -1,5 +1,4 @@
 import { randomInt } from "crypto";
-import { db } from "@/lib/db";
 
 // ─────────────────────────────────────────────────────────────
 // HacheBest — Lógica de juegos (server-side)
@@ -450,20 +449,8 @@ export function settleTictactoe(
   };
 }
 
-// ── Config de juegos (con seed inicial) ──────────────────────
-
-export async function getGameConfig(game: GameId) {
-  const row = await db.gameConfig.findUnique({ where: { game } });
-  if (row) return row;
-  const def = DEFAULT_GAME_CONFIG[game];
-  return db.gameConfig.create({
-    data: {
-      game,
-      name: def.name,
-      configJson: JSON.stringify(def.configJson),
-    },
-  });
-}
+// ── Config de juegos ─────────────────────────────────────────
+// (la lectura/escritura vive en src/lib/db.ts)
 
 export function parseConfig(jsonStr: string): Record<string, number | boolean> {
   try {

@@ -35,10 +35,13 @@ import { toast } from "sonner";
 const ADMIN_KEY_STORAGE = "hachebest.admin";
 
 // ─────────────────────────────────────────────────────────────
+// Panel de administración de HacheBest (usado por la página /admin)
+// ─────────────────────────────────────────────────────────────
 
 interface AdminStats {
   totalUsers: number;
   bannedUsers: number;
+  activeUsers: number;
   totalBets: number;
   totalWagered: number;
   totalPayout: number;
@@ -53,6 +56,19 @@ interface BigWin {
   amount: number;
   profit: number;
   multiplier: number;
+  createdAt: string;
+}
+
+interface AdminBet {
+  id: string;
+  game: string;
+  gameName: string;
+  betType: string;
+  amount: number;
+  multiplier: number;
+  payout: number;
+  profit: number;
+  outcome: string;
   createdAt: string;
 }
 
@@ -77,10 +93,19 @@ interface AdminGame {
   configJson: string;
 }
 
-export function AdminDialog({ open }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+export function AdminPanel({ active = true }: { active?: boolean }) {
   const [adminKey, setAdminKey] = useState<string | null>(null);
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Recupera la sesión de admin de esta pestaña
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const saved = window.sessionStorage.getItem(ADMIN_KEY_STORAGE);
+      if (saved) setAdminKey(saved);
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
 
   const loginAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,6 +120,13 @@ export function AdminDialog({ open }: { open: boolean; onOpenChange: (v: boolean
     setAdminKey(password);
     toast.success("Acceso concedido");
   };
+
+  const logoutAdmin = () => {
+    window.sessionStorage.removeItem(ADMIN_KEY_STORAGE);
+    setAdminKey(null);
+    toast.info("Sesión de administrador cerrada");
+  };
+
   if (!adminKey) {
     return (
       <form onSubmit={loginAdmin} className="space-y-4 py-4">
@@ -127,30 +159,35 @@ export function AdminDialog({ open }: { open: boolean; onOpenChange: (v: boolean
 
   return (
     <Tabs defaultValue="resumen" className="flex-1 min-h-0 flex flex-col gap-4 mt-2">
-      <TabsList className="grid w-full grid-cols-4">
-        <TabsTrigger value="resumen" className="gap-1.5">
-          <BarChart3 className="size-4" aria-hidden /> <span className="hidden sm:inline">Resumen</span>
-        </TabsTrigger>
-        <TabsTrigger value="usuarios" className="gap-1.5">
-          <Users className="size-4" aria-hidden /> <span className="hidden sm:inline">Usuarios</span>
-        </TabsTrigger>
-        <TabsTrigger value="juegos" className="gap-1.5">
-          <Gamepad2 className="size-4" aria-hidden /> <span className="hidden sm:inline">Juegos</span>
-        </TabsTrigger>
-        <TabsTrigger value="ajustes" className="gap-1.5">
-          <Settings2 className="size-4" aria-hidden /> <span className="hidden sm:inline">Ajustes</span>
-        </TabsTrigger>
-      </TabsList>
+      <div className="flex items-center justify-between gap-2">
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="resumen" className="gap-1.5">
+            <BarChart3 className="size-4" aria-hidden /> <span className="hidden sm:inline">Resumen</span>
+          </TabsTrigger>
+          <TabsTrigger value="usuarios" className="gap-1.5">
+            <Users className="size-4" aria-hidden /> <span className="hidden sm:inline">Usuarios</span>
+          </TabsTrigger>
+          <TabsTrigger value="juegos" className="gap-1.5">
+            <Gamepad2 className="size-4" aria-hidden /> <span className="hidden sm:inline">Juegos</span>
+          </TabsTrigger>
+          <TabsTrigger value="ajustes" className="gap-1.5">
+            <Settings2 className="size-4" aria-hidden /> <span className="hidden sm:inline">Ajustes</span>
+          </TabsTrigger>
+        </TabsList>
+        <Button variant="ghost" size="sm" onClick={logoutAdmin} className="text-muted-foreground shrink-0">
+          Salir
+        </Button>
+      </div>
 
       <div className="flex-1 min-h-0">
         <TabsContent value="resumen" className="mt-0">
-          <StatsTab adminKey={adminKey} active={open} />
+          <StatsTab adminKey={adminKey} active={active} />
         </TabsContent>
         <TabsContent value="usuarios" className="mt-0">
-          <UsersTab adminKey={adminKey} active={open} />
+          <UsersTab adminKey={adminKey} active={active} />
         </TabsContent>
         <TabsContent value="juegos" className="mt-0">
-          <GamesTab adminKey={adminKey} active={open} />
+          <GamesTab adminKey={adminKey} active={active} />
         </TabsContent>
         <TabsContent value="ajustes" className="mt-0">
           <SettingsTab adminKey={adminKey} />
@@ -165,23 +202,32 @@ export function AdminDialog({ open }: { open: boolean; onOpenChange: (v: boolean
 function StatsTab({ adminKey, active }: { adminKey: string; active: boolean }) {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [bigWins, setBigWins] = useState<BigWin[]>([]);
+  const [recent, setRecent] = useState<AdminBet[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const res = await api<{ stats: AdminStats; bigWins: BigWin[] }>("/api/admin/stats", { adminKey });
-    if (res.ok) {
-      setStats(res.data.stats);
-      setBigWins(res.data.bigWins);
+    const [resStats, resBets] = await Promise.all([
+      api<{ stats: AdminStats; bigWins: BigWin[] }>("/api/admin/stats", { adminKey }),
+      api<{ bets: AdminBet[] }>("/api/admin/bets?limit=15", { adminKey }),
+    ]);
+    if (resStats.ok) {
+      setStats(resStats.data.stats);
+      setBigWins(resStats.data.bigWins);
     } else {
-      toast.error(res.error);
+      toast.error(resStats.error);
     }
+    if (resBets.ok) setRecent(resBets.data.bets);
     setLoading(false);
   }, [adminKey]);
 
   useEffect(() => {
     if (!active) return;
     const t = setTimeout(() => void load(), 0);
-    return () => clearTimeout(t);
+    const interval = setInterval(() => void load(), 10000);
+    return () => {
+      clearTimeout(t);
+      clearInterval(interval);
+    };
   }, [load, active]);
 
   if (loading && !stats) {
@@ -190,10 +236,10 @@ function StatsTab({ adminKey, active }: { adminKey: string; active: boolean }) {
   if (!stats) return null;
 
   const cards = [
-    { label: "Usuarios", value: String(stats.totalUsers), sub: `${stats.bannedUsers} suspendidos` },
+    { label: "Usuarios", value: String(stats.totalUsers), sub: `${stats.activeUsers} activos · ${stats.bannedUsers} suspendidos` },
     { label: "Apuestas", value: stats.totalBets.toLocaleString("es-ES"), sub: `Media ${fmtUSD(stats.avgBet)}` },
-    { label: "Total apostado", value: fmtUSD(stats.totalWagered), sub: "" },
-    { label: "Beneficio de la casa", value: fmtUSD(stats.houseProfit), sub: `Pagado: ${fmtUSD(stats.totalPayout)}`, highlight: stats.houseProfit >= 0 ? "text-win" : "text-lose" },
+    { label: "Total apostado", value: fmtUSD(stats.totalWagered), sub: `Pagado: ${fmtUSD(stats.totalPayout)}` },
+    { label: "Beneficio de la casa", value: fmtUSD(stats.houseProfit), sub: "", highlight: stats.houseProfit >= 0 ? "text-win" : "text-lose" },
   ];
 
   return (
@@ -239,6 +285,56 @@ function StatsTab({ adminKey, active }: { adminKey: string; active: boolean }) {
           </Table>
         )}
       </div>
+
+      <div className="casino-card overflow-hidden">
+        <p className="border-b border-border/60 px-4 py-2 text-sm font-bold flex items-center gap-2">
+          <BarChart3 className="size-4 text-primary" aria-hidden /> Últimas apuestas (tiempo real)
+        </p>
+        <ScrollArea className="max-h-72">
+          {recent.length === 0 ? (
+            <p className="p-6 text-center text-sm text-muted-foreground">Aún no hay apuestas</p>
+          ) : (
+            <Table>
+              <TableHeader className="sticky top-0 bg-card z-10">
+                <TableRow>
+                  <TableHead>Juego</TableHead>
+                  <TableHead className="text-right">Apuesta</TableHead>
+                  <TableHead className="text-right">Mult.</TableHead>
+                  <TableHead className="text-right">Beneficio</TableHead>
+                  <TableHead className="text-right">Hora</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recent.map((b) => (
+                  <TableRow key={b.id}>
+                    <TableCell>
+                      <span className="font-semibold">{b.gameName}</span>
+                      <Badge
+                        variant="outline"
+                        className={`ml-2 ${
+                          b.outcome === "win"
+                            ? "border-win/40 text-win"
+                            : b.outcome === "lose"
+                              ? "border-lose/40 text-lose"
+                              : "border-border text-muted-foreground"
+                        }`}
+                      >
+                        {b.outcome === "win" ? "ganó" : b.outcome === "lose" ? "perdió" : b.outcome}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right tabular">{fmtUSD(b.amount)}</TableCell>
+                    <TableCell className="text-right tabular">{b.multiplier}x</TableCell>
+                    <TableCell className={`text-right tabular font-bold ${b.profit > 0 ? "text-win" : b.profit < 0 ? "text-lose" : ""}`}>
+                      {b.profit > 0 ? "+" : ""}{fmtUSD(b.profit)}
+                    </TableCell>
+                    <TableCell className="text-right text-xs text-muted-foreground">{fmtTime(b.createdAt)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </ScrollArea>
+      </div>
     </div>
   );
 }
@@ -283,7 +379,7 @@ function UsersTab({ adminKey, active }: { adminKey: string; active: boolean }) {
 
   return (
     <div className="casino-card overflow-hidden">
-      <ScrollArea className="max-h-[50vh]">
+      <ScrollArea className="max-h-[55vh]">
         <Table>
           <TableHeader className="sticky top-0 bg-card z-10">
             <TableRow>
@@ -576,7 +672,9 @@ function SettingsTab({ adminKey }: { adminKey: string }) {
         {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <KeyRound className="size-4" aria-hidden />}
         Cambiar contraseña
       </Button>
-      <p className="text-xs text-muted-foreground">Mínimo 5 caracteres. La sesión de admin se actualiza al instante.</p>
+      <p className="text-xs text-muted-foreground">
+        Mínimo 5 caracteres. También puedes definirla con la variable de entorno <code>ADMIN_PASSWORD</code> en Vercel.
+      </p>
     </form>
   );
 }

@@ -219,8 +219,9 @@ export const useCasino = create<CasinoState>((set, get) => ({
   play: async (game, betType, amount, extra) => {
     const u = get().user;
     if (!u) return { ok: false, error: "Inicia sesión para jugar" };
-    const res = await api<PlayResponse>("/api/game/play", {
-      body: { userId: u.id, game, betType, amount, extra },
+    // Endpoint propio por juego: POST /api/games/<juego>
+    const res = await api<PlayResponse>(`/api/games/${game}`, {
+      body: { userId: u.id, betType, amount, extra },
     });
     if (!res.ok) return { ok: false, error: res.error };
     set((s) => (s.user ? { user: { ...s.user, balance: res.data.balance } } : {}));
@@ -231,7 +232,7 @@ export const useCasino = create<CasinoState>((set, get) => ({
   tttStart: async (amount) => {
     const u = get().user;
     if (!u) return { ok: false, error: "Inicia sesión para jugar" };
-    const res = await api<{ betId: string; balance: number }>("/api/game/tictactoe", {
+    const res = await api<{ betId: string; balance: number }>("/api/games/tictactoe", {
       body: { userId: u.id, action: "start", amount },
     });
     if (!res.ok) return { ok: false, error: res.error };
@@ -242,7 +243,7 @@ export const useCasino = create<CasinoState>((set, get) => ({
   tttSettle: async (betId, board) => {
     const u = get().user;
     if (!u) return { ok: false, error: "Sin sesión" };
-    const res = await api<PlayResponse>("/api/game/tictactoe", {
+    const res = await api<PlayResponse>("/api/games/tictactoe", {
       body: { userId: u.id, action: "settle", betId, board },
     });
     if (!res.ok) return { ok: false, error: res.error };
@@ -254,8 +255,8 @@ export const useCasino = create<CasinoState>((set, get) => ({
   sessionStart: async (game, amount, extra) => {
     const u = get().user;
     if (!u) return { ok: false, error: "Inicia sesión para jugar" };
-    const res = await api<SessionStartData>("/api/game/session", {
-      body: { userId: u.id, game, action: "start", amount, extra },
+    const res = await api<SessionStartData>(`/api/games/${game}`, {
+      body: { userId: u.id, action: "start", amount, extra },
     });
     if (!res.ok) return { ok: false, error: res.error };
     get().setBalance(res.data.balance);
@@ -265,8 +266,8 @@ export const useCasino = create<CasinoState>((set, get) => ({
   sessionAct: async (game, betId, act, extra) => {
     const u = get().user;
     if (!u) return { ok: false, error: "Sin sesión" };
-    const res = await api<SessionActData>("/api/game/session", {
-      body: { userId: u.id, game, action: "act", betId, act, extra },
+    const res = await api<SessionActData>(`/api/games/${game}`, {
+      body: { userId: u.id, action: "act", betId, act, extra },
     });
     if (!res.ok) return { ok: false, error: res.error };
     get().setBalance(res.data.balance);

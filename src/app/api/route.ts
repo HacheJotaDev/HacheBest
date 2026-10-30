@@ -1,5 +1,45 @@
 import { NextResponse } from "next/server";
 
-export async function GET() {
-  return NextResponse.json({ message: "Hello, world!" });
+/**
+ * GET /api — índice de la API de HacheBest
+ * Cada juego tiene su propio endpoint y el panel admin el suyo (/admin).
+ */
+const GAMES = [
+  "parimpar", "exacto", "moneda", "dado", "ppt", "ruleta", "tragamonedas",
+  "rueda", "plinko", "cartaalta",           // instantáneos
+  "mayormenor", "blackjack", "mines", "crash", // multi-fase
+  "tictactoe",                              // partida
+];
+
+export function GET() {
+  return NextResponse.json({
+    name: "HacheBest API",
+    version: "2.0",
+    mode: "demo",
+    endpoints: {
+      usuarios: {
+        "POST /api/user": "login/registro demo (saldo inicial 1.000 USD)",
+        "GET /api/user?id=": "datos del usuario",
+        "POST /api/user/reset": "recargar saldo demo",
+      },
+      juegos: Object.fromEntries(
+        GAMES.map((g) => [`POST /api/games/${g}`, `jugar a ${g}`]),
+      ),
+      varios: {
+        "GET /api/games": "catálogo y configuración pública de los juegos",
+        "GET /api/bets?userId=": "historial de apuestas del usuario",
+        "GET /api/leaderboard": "top 10 por saldo",
+      },
+      admin: {
+        "POST /api/admin": "login del panel (contraseña)",
+        "GET /api/admin": "validar sesión admin",
+        "GET /api/admin/stats": "estadísticas del casino",
+        "GET /api/admin/bets?limit=": "últimas apuestas globales",
+        "GET|PUT /api/admin/games": "configuración de juegos",
+        "GET|PATCH /api/admin/users": "gestión de usuarios",
+        "GET|PUT /api/admin/settings": "contraseña del panel",
+        "GET /admin": "panel de administración (web)",
+      },
+    },
+  });
 }

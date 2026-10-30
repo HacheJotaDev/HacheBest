@@ -1,16 +1,13 @@
 import { NextRequest } from "next/server";
-import { db } from "@/lib/db";
 import { checkAdmin, unauthorized } from "@/lib/admin";
-import { GAMES, getGameConfig, ROUND2, type GameId } from "@/lib/games";
+import { listGameConfigs, updateGameConfig } from "@/lib/db";
+import { DEFAULT_GAME_CONFIG, ROUND2, type GameId } from "@/lib/games";
 
 /** GET /api/admin/games — configuración de todos los juegos (con seed) */
 export async function GET(req: NextRequest) {
   if (!(await checkAdmin(req))) return unauthorized();
   try {
-    const games = await Promise.all(
-      (GAMES as readonly GameId[]).map((g) => getGameConfig(g)),
-    );
-    return Response.json({ games });
+    return Response.json({ games: listGameConfigs() });
   } catch (e) {
     console.error("GET /api/admin/games", e);
     return Response.json({ error: "Error interno" }, { status: 500 });
@@ -29,6 +26,9 @@ export async function PUT(req: NextRequest) {
       configJson?: string;
     };
     if (!game) return Response.json({ error: "Falta game" }, { status: 400 });
+    if (!(game in DEFAULT_GAME_CONFIG)) {
+      return Response.json({ error: "Juego desconocido" }, { status: 400 });
+    }
 
     // Valida configJson si viene
     if (configJson !== undefined) {
@@ -44,20 +44,19 @@ export async function PUT(req: NextRequest) {
       }
     }
 
-    const data: Record<string, unknown> = {};
-    if (enabled !== undefined) data.enabled = enabled;
-    if (minBet !== undefined) data.minBet = ROUND2(Number(minBet));
-    if (maxBet !== undefined) data.maxBet = ROUND2(Number(maxBet));
-    if (configJson !== undefined) data.configJson = configJson;
-
-    if (data.minBet !== undefined && data.maxBet !== undefined && Number(data.minBet) > Number(data.maxBet)) {
+    const min = minBet !== undefined ? ROUND2(Number(minBet)) : undefined;
+    const max = maxBet !== undefined ? ROUND2(Number(maxBet)) : undefined;
+    if (min !== undefined && Number.isNaN(min)) return Response.json({ error: "minBet inválido" }, { status: 400 });
+    if (max !== undefined && Number.isNaN(max)) return Response.json({ error: "maxBet inválido" }, { status: 400 });
+    if (min !== undefined && max !== undefined && min > max) {
       return Response.json({ error: "La apuesta mínima no puede superar la máxima" }, { status: 400 });
     }
 
-    const updated = await db.gameConfig.upsert({
-      where: { game },
-      update: data,
-      create: { game, name: game, ...data },
+    const updated = updateGameConfig(game as GameId, {
+      ...(enabled !== undefined ? { enabled } : {}),
+      ...(min !== undefined ? { minBet: min } : {}),
+      ...(max !== undefined ? { maxBet: max } : {}),
+      ...(configJson !== undefined ? { configJson } : {}),
     });
     return Response.json({ game: updated });
   } catch (e) {
