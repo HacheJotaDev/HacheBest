@@ -1,19 +1,25 @@
 import { randomUUID } from "crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync, unlinkSync } from "fs";
 import path from "path";
+import { Pool } from "pg";
 import { DEFAULT_GAME_CONFIG, GAMES, type GameId } from "@/lib/games";
 
 // ─────────────────────────────────────────────────────────────
-// HacheBest — Capa de datos (sin base de datos externa)
+// HacheBest — Capa de datos
 //
-// Persistencia en un único archivo JSON:
-//  · Local:      <proyecto>/db/data.json
-//  · Vercel:     /tmp/hachebest/data.json  (carpeta escribible)
+// Dos modos de persistencia (elegido automáticamente):
+//  · DATABASE_URL definida → PostgreSQL (Vercel / producción).
+//    El estado completo se guarda como JSONB en la tabla
+//    `hachebest_state` (fila única id = 1 con control de versión).
+//  · Sin DATABASE_URL → archivo JSON (desarrollo sin BD):
+//    · Local:  <proyecto>/db/data.json
+//    · Vercel: /tmp/hachebest/data.json (carpeta escribible)
 //
 // Toda mutación se hace EN MEMORIA (atómica: Node es single-thread
-// y los mutadores no contienen awaits) y se escribe a disco con
-// debounce + escritura atómica (archivo temporal + rename).
-// Así el proyecto se despliega en Vercel SIN configurar nada.
+// y los mutadores no contienen awaits) y se persiste con debounce.
+// En PostgreSQL el guardado es asíncrono con reintentos y, en frío,
+// el estado remoto se hidrata fusionando cualquier mutación local
+// previa (p. ej. un usuario creado en el primer arranque).
 // ─────────────────────────────────────────────────────────────
 
 export interface UserRecord {
@@ -83,6 +89,24 @@ interface DBData {
   house: HouseBank;
 }
 
+const POSTGRES_URL = process.env.DATABASE_URL?.trim() ?? "";
+const POSTGRES = POSTGRES_URL.length > 0;
+
+// Cache global para sobrevivir al hot-reload en desarrollo
+const globalForDB = globalThis as unknown as {
+  __hachebestDB?: DBData;
+  __hachebestTimer?: ReturnType<typeof setTimeout>;
+  __hachebestWriting?: boolean;
+  __hachebestDirty?: boolean;
+  __hachebestLoaded?: boolean;
+  __hachebestHydrating?: Promise<void> | null;
+  __hachebestHydrateQueued?: boolean;
+  __hachebestHydrateTries?: number;
+  __hachebestFlushTries?: number;
+  __hachebestPool?: Pool;
+  __hachebestSchemaReady?: boolean;
+};
+
 /**
  * Banca nueva (o migrada): la casa empieza con 100 USD para pagar apuestas.
  * Si ya había historial, los beneficios pasados se suman a los fondos.
@@ -106,7 +130,7 @@ function emptyData(): DBData {
   return { version: 1, users: [], bets: [], gameConfigs: [], settings: {}, house: initialHouse([]) };
 }
 
-// ── Ubicación del archivo de datos ───────────────────────────
+// ── Modo archivo (sin DATABASE_URL) ──────────────────────────
 
 function dataFile(): string {
   if (process.env.HACHEBEST_DATA_FILE) return process.env.HACHEBEST_DATA_FILE;
@@ -114,13 +138,208 @@ function dataFile(): string {
   return path.join(process.cwd(), "db", "data.json");
 }
 
-// Cache global para sobrevivir al hot-reload en desarrollo
-const globalForDB = globalThis as unknown as {
-  __hachebestDB?: DBData;
-  __hachebestTimer?: ReturnType<typeof setTimeout>;
-  __hachebestWriting?: boolean;
-  __hachebestDirty?: boolean;
-};
+/** Escritura atómica: escribe a .tmp y renombra */
+function writeNow(data: DBData) {
+  const file = dataFile();
+  try {
+    mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(data), "utf8");
+    try {
+      unlinkSync(file);
+    } catch {
+      /* no existía */
+    }
+    renameSync(tmp, file);
+  } catch (e) {
+    console.error("[db] No se pudo guardar el archivo de datos:", e);
+  }
+}
+
+// ── Modo PostgreSQL (DATABASE_URL definida) ──────────────────
+
+const CREATE_SQL = `CREATE TABLE IF NOT EXISTS hachebest_state (
+  id INTEGER PRIMARY KEY,
+  version INTEGER NOT NULL DEFAULT 0,
+  data JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)`;
+
+const UPSERT_SQL = `INSERT INTO hachebest_state (id, version, data)
+VALUES (1, 1, $1::jsonb)
+ON CONFLICT (id) DO UPDATE
+  SET data = EXCLUDED.data,
+      version = hachebest_state.version + 1,
+      updated_at = now()`;
+
+function pgPool(): Pool {
+  if (globalForDB.__hachebestPool) return globalForDB.__hachebestPool;
+  const url = new URL(POSTGRES_URL);
+  const sslMode = (url.searchParams.get("sslmode") ?? "").toLowerCase();
+  // Los parámetros SSL se gestionan aquí: conexión SIEMPRE cifrada
+  // salvo sslmode=disable. Sin validación de certificado (funciona
+  // con sslmode=verify-full aunque no dispongamos del CA del servidor).
+  url.searchParams.delete("sslmode");
+  url.searchParams.delete("sslrootcert");
+  url.searchParams.delete("sslcrl");
+  const pool = new Pool({
+    connectionString: url.toString(),
+    ssl: sslMode === "disable" ? undefined : { rejectUnauthorized: false },
+    max: 3,
+    connectionTimeoutMillis: 10_000,
+    idleTimeoutMillis: 30_000,
+    application_name: "hachebest",
+  });
+  pool.on("error", (e) => console.error("[db] Pool PostgreSQL:", e instanceof Error ? e.message : e));
+  globalForDB.__hachebestPool = pool;
+  return pool;
+}
+
+async function ensureSchema(): Promise<void> {
+  if (globalForDB.__hachebestSchemaReady) return;
+  await pgPool().query(CREATE_SQL);
+  globalForDB.__hachebestSchemaReady = true;
+}
+
+function isDbData(v: unknown): v is DBData {
+  const d = v as DBData | null | undefined;
+  return Boolean(d) && d!.version === 1 && Array.isArray(d!.users) && Array.isArray(d!.bets);
+}
+
+/** Normaliza un estado venido de remoto (migra banca antigua, etc.) */
+function normalizeData(parsed: DBData): DBData {
+  return {
+    version: 1,
+    users: parsed.users ?? [],
+    bets: parsed.bets ?? [],
+    gameConfigs: Array.isArray(parsed.gameConfigs) ? parsed.gameConfigs : [],
+    settings: parsed.settings ?? {},
+    house:
+      parsed.house && Number.isFinite(parsed.house.funds)
+        ? {
+            funds: parsed.house.funds,
+            capital: Number.isFinite(parsed.house.capital) ? parsed.house.capital : parsed.house.funds,
+            withdrawn: Number.isFinite(parsed.house.withdrawn) ? parsed.house.withdrawn : 0,
+            withdrawals: Array.isArray(parsed.house.withdrawals) ? parsed.house.withdrawals : [],
+          }
+        : initialHouse(parsed.bets ?? []),
+  };
+}
+
+/**
+ * Fusiona el estado remoto en el local preservando lo creado aquí
+ * antes de terminar la hidratación (usuarios/apuestas/ajustes nuevos).
+ * El remoto gana en los datos que ya existen.
+ */
+function mergeRemoteIntoLocal(local: DBData, remote: DBData): void {
+  const userIds = new Set(remote.users.map((u) => u.id));
+  for (const u of local.users) if (!userIds.has(u.id)) remote.users.push(u);
+  const betIds = new Set(remote.bets.map((b) => b.id));
+  for (const b of local.bets) if (!betIds.has(b.id)) remote.bets.push(b);
+  for (const [k, v] of Object.entries(local.settings)) {
+    if (remote.settings[k] === undefined) remote.settings[k] = v;
+  }
+  local.users = remote.users;
+  local.bets = remote.bets;
+  local.settings = remote.settings;
+  if (Array.isArray(remote.gameConfigs) && remote.gameConfigs.length > 0) {
+    local.gameConfigs = remote.gameConfigs;
+  }
+  if (remote.house && Number.isFinite(remote.house.funds)) {
+    local.house = normalizeData({ ...remote }).house;
+  }
+  local.version = 1;
+}
+
+/** Carga el estado remoto la primera vez (arranque en frío) */
+function hydrate(): Promise<void> {
+  if (globalForDB.__hachebestLoaded) return Promise.resolve();
+  if (globalForDB.__hachebestHydrating) return globalForDB.__hachebestHydrating;
+  if (globalForDB.__hachebestHydrateQueued) return Promise.resolve();
+
+  const task = (async () => {
+    try {
+      await ensureSchema();
+      const res = await pgPool().query<{ data: unknown }>("SELECT data FROM hachebest_state WHERE id = 1");
+      const raw = res.rows[0]?.data;
+      const local = globalForDB.__hachebestDB;
+      if (raw && isDbData(raw) && local) {
+        const remote = normalizeData(raw);
+        if (globalForDB.__hachebestDirty) {
+          mergeRemoteIntoLocal(local, remote);
+          seedGameConfigs(local);
+          migrateHouse(local);
+        } else {
+          seedGameConfigs(remote);
+          migrateHouse(remote);
+          globalForDB.__hachebestDB = remote;
+        }
+      }
+      globalForDB.__hachebestLoaded = true;
+      globalForDB.__hachebestHydrateTries = undefined;
+      console.log("[db] Estado cargado desde PostgreSQL");
+      if (globalForDB.__hachebestDirty) scheduleSave();
+    } catch (e) {
+      const tries = (globalForDB.__hachebestHydrateTries ?? 0) + 1;
+      globalForDB.__hachebestHydrateTries = tries;
+      const wait = Math.min(tries * 2000, 30_000);
+      if (tries <= 3 || tries % 5 === 0) {
+        console.error(
+          `[db] No se pudo cargar desde PostgreSQL (reintento en ${Math.round(wait / 1000)}s):`,
+          e instanceof Error ? e.message : e,
+        );
+      }
+      globalForDB.__hachebestHydrateQueued = true;
+      setTimeout(() => {
+        globalForDB.__hachebestHydrateQueued = false;
+        void hydrate();
+      }, wait);
+    } finally {
+      globalForDB.__hachebestHydrating = null;
+    }
+  })();
+
+  globalForDB.__hachebestHydrating = task;
+  return task;
+}
+
+/** Guarda el estado completo en PostgreSQL (fila única JSONB) */
+async function flushNow(): Promise<void> {
+  const data = globalForDB.__hachebestDB;
+  if (!data || globalForDB.__hachebestWriting) return;
+  globalForDB.__hachebestWriting = true;
+  globalForDB.__hachebestDirty = false; // si alguien muta durante el guardado, queda marcado otra vez
+  let ok = false;
+  try {
+    await ensureSchema();
+    await pgPool().query(UPSERT_SQL, [JSON.stringify(data)]);
+    ok = true;
+    globalForDB.__hachebestFlushTries = undefined;
+  } catch (e) {
+    globalForDB.__hachebestDirty = true;
+    console.error("[db] No se pudo guardar en PostgreSQL:", e instanceof Error ? e.message : e);
+  }
+  globalForDB.__hachebestWriting = false;
+  if (ok) {
+    if (globalForDB.__hachebestDirty && !globalForDB.__hachebestTimer) scheduleSave();
+  } else {
+    const tries = (globalForDB.__hachebestFlushTries ?? 0) + 1;
+    globalForDB.__hachebestFlushTries = tries;
+    const wait = Math.min(tries * 1000, 10_000);
+    setTimeout(() => {
+      globalForDB.__hachebestFlushTries = undefined;
+      if (globalForDB.__hachebestDirty && !globalForDB.__hachebestTimer) scheduleSave();
+    }, wait);
+  }
+}
+
+/** Espera (si procede) a que el estado remoto esté hidratado */
+export function ensureHydrated(): Promise<void> {
+  if (!POSTGRES) return Promise.resolve();
+  return hydrate();
+}
+
+// ── Siembra y migraciones ────────────────────────────────────
 
 function seedGameConfigs(data: DBData) {
   // Purga configuraciones de juegos eliminados del catálogo (p. ej. crash, mines)
@@ -144,40 +363,6 @@ function seedGameConfigs(data: DBData) {
       });
     }
   }
-}
-
-function loadData(): DBData {
-  if (globalForDB.__hachebestDB) return globalForDB.__hachebestDB;
-  const file = dataFile();
-  let data = emptyData();
-  try {
-    const raw = readFileSync(file, "utf8");
-    const parsed = JSON.parse(raw) as DBData;
-    if (parsed && Array.isArray(parsed.users) && Array.isArray(parsed.bets)) {
-      data = {
-        version: 1,
-        users: parsed.users,
-        bets: parsed.bets,
-        gameConfigs: Array.isArray(parsed.gameConfigs) ? parsed.gameConfigs : [],
-        settings: parsed.settings ?? {},
-        house:
-          parsed.house && Number.isFinite(parsed.house.funds)
-            ? {
-                funds: parsed.house.funds,
-                capital: Number.isFinite(parsed.house.capital) ? parsed.house.capital : parsed.house.funds,
-                withdrawn: Number.isFinite(parsed.house.withdrawn) ? parsed.house.withdrawn : 0,
-                withdrawals: Array.isArray(parsed.house.withdrawals) ? parsed.house.withdrawals : [],
-              }
-            : initialHouse(parsed.bets), // migración v3: banca con 100 USD de base
-      };
-    }
-  } catch {
-    // Archivo inexistente o corrupto → base nueva
-  }
-  seedGameConfigs(data);
-  migrateHouse(data);
-  globalForDB.__hachebestDB = data;
-  return data;
 }
 
 /**
@@ -215,32 +400,56 @@ function migrateHouse(data: DBData) {
   if (touched) scheduleSave();
 }
 
-/** Escritura atómica: escribe a .tmp y renombra */
-function writeNow(data: DBData) {
-  const file = dataFile();
-  try {
-    mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(data), "utf8");
+function loadData(): DBData {
+  const cached = globalForDB.__hachebestDB;
+  if (cached) {
+    if (POSTGRES) void hydrate();
+    return cached;
+  }
+  let data = emptyData();
+  if (!POSTGRES) {
     try {
-      unlinkSync(file);
+      const raw = readFileSync(dataFile(), "utf8");
+      const parsed = JSON.parse(raw) as DBData;
+      if (parsed && Array.isArray(parsed.users) && Array.isArray(parsed.bets)) {
+        data = normalizeData(parsed);
+      }
     } catch {
-      /* no existía */
+      // Archivo inexistente o corrupto → base nueva
     }
-    renameSync(tmp, file);
-  } catch (e) {
-    console.error("[db] No se pudo guardar el archivo de datos:", e);
+  }
+  seedGameConfigs(data);
+  migrateHouse(data);
+  globalForDB.__hachebestDB = data;
+  if (POSTGRES) void hydrate();
+  return data;
+}
+
+/** Persistencia con debounce (Postgres o archivo según el modo) */
+function persistSoon() {
+  globalForDB.__hachebestTimer = undefined;
+  const data = globalForDB.__hachebestDB;
+  if (!data) return;
+  if (POSTGRES) {
+    // Espera a la hidratación inicial: evita pisar el estado remoto
+    // con el estado bootstrap de un arranque en frío.
+    if (!globalForDB.__hachebestLoaded) {
+      scheduleSave();
+      return;
+    }
+    void flushNow();
+  } else {
+    writeNow(data);
   }
 }
 
 function scheduleSave() {
   const data = globalForDB.__hachebestDB;
   if (!data) return;
+  globalForDB.__hachebestDirty = true;
   if (globalForDB.__hachebestTimer) return; // ya hay un guardado programado
-  globalForDB.__hachebestTimer = setTimeout(() => {
-    globalForDB.__hachebestTimer = undefined;
-    writeNow(globalForDB.__hachebestDB ?? data);
-  }, 40);
+  const wait = POSTGRES && !globalForDB.__hachebestLoaded ? 250 : 40;
+  globalForDB.__hachebestTimer = setTimeout(persistSoon, wait);
 }
 
 // ── Usuarios ─────────────────────────────────────────────────

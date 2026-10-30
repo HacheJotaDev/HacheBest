@@ -1,9 +1,10 @@
 import { NextRequest } from "next/server";
-import { listUserBets } from "@/lib/db";
+import { ensureHydrated, listUserBets } from "@/lib/db";
 
 /** GET /api/bets?userId=...&limit=25 — historial de apuestas del usuario */
 export async function GET(req: NextRequest) {
   try {
+    await ensureHydrated();
     const sp = req.nextUrl.searchParams;
     const userId = sp.get("userId");
     const limit = Math.min(Number(sp.get("limit") ?? 25) || 25, 100);

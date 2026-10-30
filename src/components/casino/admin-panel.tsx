@@ -117,6 +117,7 @@ interface AdminGame {
 
 export function AdminPanel({ active = true }: { active?: boolean }) {
   const [adminKey, setAdminKey] = useState<string | null>(null);
+  const [user, setUser] = useState("HacheJota");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -132,7 +133,7 @@ export function AdminPanel({ active = true }: { active?: boolean }) {
   const loginAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    const res = await api<{ ok: boolean }>("/api/admin", { body: { password } });
+    const res = await api<{ ok: boolean }>("/api/admin", { body: { user, password } });
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error);
@@ -157,8 +158,19 @@ export function AdminPanel({ active = true }: { active?: boolean }) {
             <Lock className="size-6 text-primary" aria-hidden />
           </span>
           <p className="text-sm text-muted-foreground">
-            Introduce la contraseña de administrador para acceder al panel.
+            Introduce el usuario y la contraseña de administrador para acceder al panel.
           </p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="admin-user">Usuario</Label>
+          <Input
+            id="admin-user"
+            type="text"
+            value={user}
+            onChange={(e) => setUser(e.target.value)}
+            placeholder="HacheJota"
+            autoComplete="username"
+          />
         </div>
         <div className="space-y-2">
           <Label htmlFor="admin-pass">Contraseña</Label>
@@ -167,11 +179,11 @@ export function AdminPanel({ active = true }: { active?: boolean }) {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="Por defecto: admin123"
+            placeholder="Por defecto: HacheAdmin"
             autoFocus
           />
         </div>
-        <Button type="submit" className="w-full" disabled={busy || !password}>
+        <Button type="submit" className="w-full" disabled={busy || !password || !user}>
           {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <KeyRound className="size-4" aria-hidden />}
           Entrar
         </Button>
@@ -1011,7 +1023,7 @@ function PasswordForm({ adminKey }: { adminKey: string }) {
         Cambiar contraseña
       </Button>
       <p className="text-xs text-muted-foreground">
-        Mínimo 5 caracteres. También puedes definirla con la variable de entorno <code>ADMIN_PASSWORD</code> en Vercel.
+        Mínimo 5 caracteres. También puedes definir usuario y contraseña con las variables de entorno <code>ADMIN_USER</code> y <code>ADMIN_PASSWORD</code> en Vercel.
       </p>
     </form>
   );

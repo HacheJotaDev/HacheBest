@@ -1,9 +1,10 @@
-import { listUsers } from "@/lib/db";
+import { ensureHydrated, listUsers } from "@/lib/db";
 import { ROUND2 } from "@/lib/games";
 
 /** GET /api/leaderboard — top 10 por saldo (solo usuarios con apuestas) */
 export async function GET() {
   try {
+    await ensureHydrated();
     const users = listUsers(500)
       .filter((u) => u.betsCount > 0 && !u.isBanned)
       .sort((a, b) => b.balance - a.balance || b.totalWagered - a.totalWagered)

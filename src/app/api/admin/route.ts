@@ -1,13 +1,16 @@
 import { NextRequest } from "next/server";
-import { checkAdmin, getAdminPassword } from "@/lib/admin";
+import { checkAdmin, getAdminPassword, getAdminUser } from "@/lib/admin";
+import { ensureHydrated } from "@/lib/db";
 
 /** POST /api/admin — login del panel de administración */
 export async function POST(req: NextRequest) {
   try {
-    const { password } = (await req.json()) as { password?: string };
-    const real = await getAdminPassword();
-    if (!password || password !== real) {
-      return Response.json({ error: "Contraseña incorrecta" }, { status: 401 });
+    await ensureHydrated();
+    const { user, password } = (await req.json()) as { user?: string; password?: string };
+    const [realUser, realPassword] = await Promise.all([getAdminUser(), getAdminPassword()]);
+    const userOk = typeof user === "string" && user.trim().toLowerCase() === realUser.toLowerCase();
+    if (!userOk || !password || password !== realPassword) {
+      return Response.json({ error: "Usuario o contraseña incorrectos" }, { status: 401 });
     }
     return Response.json({ ok: true });
   } catch {
@@ -17,6 +20,7 @@ export async function POST(req: NextRequest) {
 
 /** GET /api/admin — valida la cabecera x-admin-key */
 export async function GET(req: NextRequest) {
+  await ensureHydrated();
   const ok = await checkAdmin(req);
   return Response.json({ ok }, { status: ok ? 200 : 401 });
 }

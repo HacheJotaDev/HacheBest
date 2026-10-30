@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { createUser, getUser, getUserByUsername } from "@/lib/db";
+import { createUser, ensureHydrated, getUser, getUserByUsername } from "@/lib/db";
 import { ROUND2, STARTING_BALANCE } from "@/lib/games";
 
 const USERNAME_RE = /^[a-zA-Z0-9_áéíóúüñÁÉÍÓÚÑ]{2,16}$/;
@@ -33,6 +33,7 @@ function publicUser(u: {
 /** POST /api/user — login/registro demo con nombre de usuario (saldo inicial 1.000 USD) */
 export async function POST(req: NextRequest) {
   try {
+    await ensureHydrated();
     const body = (await req.json()) as { username?: string };
     const raw = (body.username ?? "").trim();
     if (!USERNAME_RE.test(raw)) {
@@ -61,6 +62,7 @@ export async function POST(req: NextRequest) {
 /** GET /api/user?id=... — datos del usuario */
 export async function GET(req: NextRequest) {
   try {
+    await ensureHydrated();
     const id = req.nextUrl.searchParams.get("id");
     if (!id) return Response.json({ error: "Falta id" }, { status: 400 });
     const user = getUser(id);
