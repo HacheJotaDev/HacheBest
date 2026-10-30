@@ -1,0 +1,60 @@
+// HacheBest — Casino de apuestas demo
+// Prisma schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique // almacenado en minúsculas
+  balance      Float    @default(1000) // saldo demo inicial
+  totalWagered Float    @default(0)
+  totalPayout  Float    @default(0)
+  betsCount    Int      @default(0)
+  winsCount    Int      @default(0)
+  lossesCount  Int      @default(0)
+  isBanned     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  bets         Bet[]
+}
+
+model Bet {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  game       String // parimpar | exacto | moneda | dado | tictactoe | ppt
+  betType    String // opción elegida (par/impar, cara/cruz, mayor/menor, figura, etc.)
+  amount     Float
+  multiplier Float    @default(0)
+  payout     Float    @default(0) // total devuelto al usuario
+  profit     Float    @default(0) // payout - amount
+  outcome    String   @default("settled") // win | lose | draw | void | pending
+  resultJson String   @default("{}") // detalles del resultado
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId, createdAt])
+}
+
+model GameConfig {
+  id         String  @id @default(cuid())
+  game       String  @unique
+  name       String
+  enabled    Boolean @default(true)
+  minBet     Float   @default(1)
+  maxBet     Float   @default(500)
+  configJson String  @default("{}") // { "multiplier": 1.95 } etc.
+}
+
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+}
