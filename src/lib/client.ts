@@ -7,7 +7,7 @@
 export async function api<T>(
   url: string,
   options?: { method?: string; body?: unknown; adminKey?: string },
-): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
+): Promise<{ ok: true; data: T } | { ok: false; error: string; status?: number }> {
   try {
     const res = await fetch(url, {
       method: options?.method ?? (options?.body ? "POST" : "GET"),
@@ -20,7 +20,7 @@ export async function api<T>(
     });
     const json = (await res.json()) as T & { error?: string };
     if (!res.ok) {
-      return { ok: false, error: json?.error ?? `Error ${res.status}` };
+      return { ok: false, error: json?.error ?? `Error ${res.status}`, status: res.status };
     }
     return { ok: true, data: json };
   } catch {

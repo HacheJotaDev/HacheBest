@@ -144,8 +144,8 @@ export function Header() {
                     )}
                     <DropdownMenuItem
                       onClick={() => {
-                        logout();
-                        toast.info("Sesión cerrada. ¡Vuelve pronto!");
+                        toast.info("Cerrando sesión…");
+                        void logout();
                       }}
                     >
                       <LogOut className="size-4" aria-hidden />
@@ -154,11 +154,7 @@ export function Header() {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </>
-            ) : (
-              <Button size="sm" onClick={() => useCasino.setState({ hydrated: false })} className="hidden">
-                Entrar
-              </Button>
-            )}
+            ) : null}
           </div>
         </div>
 

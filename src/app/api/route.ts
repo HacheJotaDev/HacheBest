@@ -18,8 +18,10 @@ export function GET() {
     mode: "demo",
     endpoints: {
       usuarios: {
-        "POST /api/user": "login/registro demo (saldo inicial 1.000 USD)",
-        "GET /api/user?id=": "datos del usuario",
+        "POST /api/auth/login": "entrar o crear cuenta (usuario + contraseña)",
+        "GET /api/auth/me": "usuario con sesión activa",
+        "POST /api/auth/logout": "cerrar sesión",
+        "GET /api/user": "datos del usuario con sesión",
         "POST /api/user/reset": "recargar saldo demo",
       },
       juegos: Object.fromEntries(
@@ -27,7 +29,7 @@ export function GET() {
       ),
       varios: {
         "GET /api/games": "catálogo y configuración pública de los juegos",
-        "GET /api/bets?userId=": "historial de apuestas del usuario",
+        "GET /api/bets": "historial de apuestas del usuario con sesión",
         "GET /api/leaderboard": "top 10 por saldo",
       },
       admin: {

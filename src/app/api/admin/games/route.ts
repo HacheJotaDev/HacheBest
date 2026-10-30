@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { checkAdmin, unauthorized } from "@/lib/admin";
-import { listGameConfigs, updateGameConfig } from "@/lib/db";
+import { listGameConfigs, refreshFromRemote, settle, updateGameConfig } from "@/lib/db";
 import { DEFAULT_GAME_CONFIG, ROUND2, type GameId } from "@/lib/games";
 
 /** GET /api/admin/games — configuración de todos los juegos (con seed) */
@@ -17,6 +17,15 @@ export async function GET(req: NextRequest) {
 /** PUT /api/admin/games — actualiza config de un juego */
 export async function PUT(req: NextRequest) {
   if (!(await checkAdmin(req))) return unauthorized();
+  await refreshFromRemote();
+  try {
+    return await putInner(req);
+  } finally {
+    await settle();
+  }
+}
+
+async function putInner(req: NextRequest): Promise<Response> {
   try {
     const { game, enabled, minBet, maxBet, configJson } = (await req.json()) as {
       game?: string;

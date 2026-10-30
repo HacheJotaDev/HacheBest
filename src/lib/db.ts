@@ -16,15 +16,23 @@ import { DEFAULT_GAME_CONFIG, GAMES, type GameId } from "@/lib/games";
 //    · Vercel: /tmp/hachebest/data.json (carpeta escribible)
 //
 // Toda mutación se hace EN MEMORIA (atómica: Node es single-thread
-// y los mutadores no contienen awaits) y se persiste con debounce.
-// En PostgreSQL el guardado es asíncrono con reintentos y, en frío,
-// el estado remoto se hidrata fusionando cualquier mutación local
-// previa (p. ej. un usuario creado en el primer arranque).
+// y los mutadores no contienen awaits). La PERSISTENCIA es la garantía
+// clave para serverless (Vercel):
+//  · CADA endpoint que escribe llama a settle() antes de responder →
+//    el guardado está CONFIRMADO en la base antes de enviar la respuesta
+//    (si no, serverless congela la instancia y la escritura se pierde:
+//    usuarios que "desaparecen").
+//  · La escritura usa CAS por versión: solo pisa la fila si nadie más
+//    escribió; si hay conflicto, recarga, FUSIONA y reintenta (dos
+//    instancias ya no se borran datos entre ellas).
+//  · Los endpoints de escritura se sincronizan antes con refreshFromRemote().
 // ─────────────────────────────────────────────────────────────
 
 export interface UserRecord {
   id: string;
   username: string; // en minúsculas
+  /** Hash scrypt de la contraseña (null = cuenta antigua aún sin proteger) */
+  passHash: string | null;
   balance: number;
   totalWagered: number;
   totalPayout: number;
@@ -105,6 +113,10 @@ const globalForDB = globalThis as unknown as {
   __hachebestFlushTries?: number;
   __hachebestPool?: Pool;
   __hachebestSchemaReady?: boolean;
+  /** Versión de la fila tal y como la vimos por última vez (CAS) */
+  __hachebestSeenVersion?: number;
+  /** Cadena de guardados en curso (settle() la espera) */
+  __hachebestChain?: Promise<void>;
 };
 
 /**
@@ -165,12 +177,19 @@ const CREATE_SQL = `CREATE TABLE IF NOT EXISTS hachebest_state (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 )`;
 
-const UPSERT_SQL = `INSERT INTO hachebest_state (id, version, data)
+/** Primera escritura cuando la tabla aún está vacía (no pisa a nadie) */
+const INSERT_FIRST_SQL = `INSERT INTO hachebest_state (id, version, data)
 VALUES (1, 1, $1::jsonb)
-ON CONFLICT (id) DO UPDATE
-  SET data = EXCLUDED.data,
-      version = hachebest_state.version + 1,
-      updated_at = now()`;
+ON CONFLICT (id) DO NOTHING
+RETURNING version`;
+
+/** Escritura condicional: solo aplica si la fila sigue en la versión vista */
+const CAS_UPSERT_SQL = `UPDATE hachebest_state
+SET data = $1::jsonb, version = version + 1, updated_at = now()
+WHERE id = 1 AND version = $2
+RETURNING version`;
+
+const SELECT_STATE_SQL = "SELECT version, data FROM hachebest_state WHERE id = 1";
 
 function pgPool(): Pool {
   if (globalForDB.__hachebestPool) return globalForDB.__hachebestPool;
@@ -210,7 +229,10 @@ function isDbData(v: unknown): v is DBData {
 function normalizeData(parsed: DBData): DBData {
   return {
     version: 1,
-    users: parsed.users ?? [],
+    users: (parsed.users ?? []).map((u) => ({
+      ...u,
+      passHash: typeof u.passHash === "string" && u.passHash.length > 0 ? u.passHash : null,
+    })),
     bets: parsed.bets ?? [],
     gameConfigs: Array.isArray(parsed.gameConfigs) ? parsed.gameConfigs : [],
     settings: parsed.settings ?? {},
@@ -260,8 +282,10 @@ function hydrate(): Promise<void> {
   const task = (async () => {
     try {
       await ensureSchema();
-      const res = await pgPool().query<{ data: unknown }>("SELECT data FROM hachebest_state WHERE id = 1");
-      const raw = res.rows[0]?.data;
+      const res = await pgPool().query<{ version: number; data: unknown }>(SELECT_STATE_SQL);
+      const row = res.rows[0];
+      const raw = row?.data;
+      if (row) globalForDB.__hachebestSeenVersion = row.version;
       const local = globalForDB.__hachebestDB;
       if (raw && isDbData(raw) && local) {
         const remote = normalizeData(raw);
@@ -303,34 +327,98 @@ function hydrate(): Promise<void> {
   return task;
 }
 
+/**
+ * Guardado con CONCURRENCIA SEGURA (CAS por versión):
+ * solo escribe si la fila sigue en la versión que vimos; si otra
+ * instancia escribió mientras tanto, recarga su estado, lo fusiona
+ * (conservando lo creado aquí) y reintenta.
+ */
+async function casUpsert(data: DBData): Promise<boolean> {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const seen = globalForDB.__hachebestSeenVersion;
+    if (seen === undefined) {
+      // No conocemos la versión remota (arranque en frío): mirar qué hay
+      const cur = await pgPool().query<{ version: number; data: unknown }>(SELECT_STATE_SQL);
+      if (cur.rows.length === 0) {
+        const ins = await pgPool().query(INSERT_FIRST_SQL, [JSON.stringify(data)]);
+        if (ins.rows.length > 0) {
+          globalForDB.__hachebestSeenVersion = 1;
+          return true;
+        }
+        continue; // otra instancia la creó justo ahora → fusionar en la siguiente vuelta
+      }
+      globalForDB.__hachebestSeenVersion = cur.rows[0].version;
+      const remote = normalizeData(cur.rows[0].data as DBData);
+      if (isDbData(remote)) mergeRemoteIntoLocal(data, remote);
+      continue;
+    }
+    const upd = await pgPool().query<{ version: number }>(CAS_UPSERT_SQL, [
+      JSON.stringify(data),
+      seen,
+    ]);
+    if (upd.rows.length > 0) {
+      globalForDB.__hachebestSeenVersion = upd.rows[0].version;
+      return true;
+    }
+    // Conflicto: otra instancia guardó primero. Recarga, fusiona y reintenta.
+    const cur = await pgPool().query<{ version: number; data: unknown }>(SELECT_STATE_SQL);
+    if (cur.rows.length === 0) {
+      globalForDB.__hachebestSeenVersion = undefined;
+      continue;
+    }
+    globalForDB.__hachebestSeenVersion = cur.rows[0].version;
+    const remote = normalizeData(cur.rows[0].data as DBData);
+    if (isDbData(remote)) {
+      const bank = data.house; // los movimientos de ESTA instancia no se pierden
+      mergeRemoteIntoLocal(data, remote);
+      data.house = bank;
+    }
+  }
+  return false;
+}
+
 /** Guarda el estado completo en PostgreSQL (fila única JSONB) */
 async function flushNow(): Promise<void> {
   const data = globalForDB.__hachebestDB;
   if (!data || globalForDB.__hachebestWriting) return;
+  if (!globalForDB.__hachebestDirty) return; // nada pendiente que guardar
   globalForDB.__hachebestWriting = true;
   globalForDB.__hachebestDirty = false; // si alguien muta durante el guardado, queda marcado otra vez
   let ok = false;
   try {
     await ensureSchema();
-    await pgPool().query(UPSERT_SQL, [JSON.stringify(data)]);
-    ok = true;
-    globalForDB.__hachebestFlushTries = undefined;
+    ok = await casUpsert(data);
+    if (ok) {
+      globalForDB.__hachebestFlushTries = undefined;
+    } else {
+      globalForDB.__hachebestDirty = true;
+      console.error("[db] PostgreSQL ocupado: el guardado se reintentará solo");
+    }
   } catch (e) {
     globalForDB.__hachebestDirty = true;
     console.error("[db] No se pudo guardar en PostgreSQL:", e instanceof Error ? e.message : e);
   }
   globalForDB.__hachebestWriting = false;
-  if (ok) {
-    if (globalForDB.__hachebestDirty && !globalForDB.__hachebestTimer) scheduleSave();
-  } else {
+  if (!ok) {
     const tries = (globalForDB.__hachebestFlushTries ?? 0) + 1;
     globalForDB.__hachebestFlushTries = tries;
     const wait = Math.min(tries * 1000, 10_000);
     setTimeout(() => {
       globalForDB.__hachebestFlushTries = undefined;
-      if (globalForDB.__hachebestDirty && !globalForDB.__hachebestTimer) scheduleSave();
+      if (globalForDB.__hachebestDirty) queueFlush();
     }, wait);
+  } else if (globalForDB.__hachebestDirty) {
+    queueFlush(); // mutó durante el guardado → otra pasada
   }
+}
+
+/** Encola un guardado en la cadena (settle() puede esperarla) */
+function queueFlush(): void {
+  const g = globalForDB;
+  g.__hachebestChain = (g.__hachebestChain ?? Promise.resolve()).then(
+    () => flushNow(),
+    () => flushNow(),
+  );
 }
 
 /** Espera (si procede) a que el estado remoto esté hidratado */
@@ -339,15 +427,76 @@ export function ensureHydrated(): Promise<void> {
   return hydrate();
 }
 
+/**
+ * GARANTÍA DE PERSISTENCIA: espera a que TODO lo mutado esté ya
+ * escrito en la base ANTES de responder al cliente. Sin esto,
+ * serverless (Vercel) congela la instancia al enviar la respuesta
+ * y el guardado con debounce nunca llega a ejecutarse → datos que
+ * "desaparecen" (usuarios creados que luego no están).
+ * CADA endpoint que escribe debe hacer `await settle()` antes de
+ * devolver su Response.
+ */
+export async function settle(): Promise<void> {
+  if (!POSTGRES) {
+    // Modo archivo: la escritura es síncrona, solo espera al debounce
+    for (let i = 0; i < 20 && globalForDB.__hachebestTimer; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    return;
+  }
+  for (let i = 0; i < 120; i++) {
+    if (
+      !globalForDB.__hachebestDirty &&
+      !globalForDB.__hachebestWriting &&
+      !globalForDB.__hachebestTimer
+    ) {
+      return;
+    }
+    await (globalForDB.__hachebestChain ?? Promise.resolve());
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  console.error(
+    "[db] settle(): el guardado tardó demasiado (sigue reintentando en segundo plano)",
+  );
+}
+
+/**
+ * Sincroniza la memoria con PostgreSQL ANTES de una petición que va a
+ * escribir: evita que una instancia "caliente" con memoria vieja pise
+ * datos nuevos guardados por otra instancia. Best-effort: si la BD no
+ * responde, se sigue con la memoria local.
+ */
+export async function refreshFromRemote(): Promise<void> {
+  if (!POSTGRES) return;
+  await ensureHydrated();
+  if (globalForDB.__hachebestDirty || globalForDB.__hachebestWriting) return;
+  if (!globalForDB.__hachebestLoaded) return;
+  try {
+    const res = await pgPool().query<{ version: number; data: unknown }>(SELECT_STATE_SQL);
+    const row = res.rows[0];
+    if (!row) return;
+    const remote = normalizeData(row.data as DBData);
+    if (!isDbData(remote)) return;
+    globalForDB.__hachebestDB = remote;
+    globalForDB.__hachebestSeenVersion = row.version;
+    seedGameConfigs(remote);
+    migrateHouse(remote);
+  } catch (e) {
+    console.error("[db] refresh():", e instanceof Error ? e.message : e);
+  }
+}
+
 // ── Siembra y migraciones ────────────────────────────────────
 
+/** Siembra/normaliza las configs de juegos; guarda si cambió algo */
 function seedGameConfigs(data: DBData) {
+  let changed = false;
   // Purga configuraciones de juegos eliminados del catálogo (p. ej. crash, mines)
   const valid = new Set<string>(GAMES as readonly string[]);
   const before = data.gameConfigs.length;
   if (before > 0) {
     data.gameConfigs = data.gameConfigs.filter((c) => valid.has(c.game));
-    if (data.gameConfigs.length !== before) scheduleSave();
+    changed = data.gameConfigs.length !== before;
   }
   for (const g of GAMES) {
     if (!data.gameConfigs.some((c) => c.game === g)) {
@@ -361,8 +510,10 @@ function seedGameConfigs(data: DBData) {
         maxBet: 500,
         configJson: JSON.stringify(def.configJson),
       });
+      changed = true;
     }
   }
+  if (changed) scheduleSave();
 }
 
 /**
@@ -455,7 +606,7 @@ function persistSoon() {
       scheduleSave();
       return;
     }
-    void flushNow();
+    queueFlush();
   } else {
     writeNow(data);
   }
@@ -481,11 +632,16 @@ export function getUserByUsername(username: string): UserRecord | null {
   return loadData().users.find((u) => u.username === name) ?? null;
 }
 
-export function createUser(username: string, startingBalance: number): UserRecord {
+export function createUser(
+  username: string,
+  startingBalance: number,
+  passHash: string,
+): UserRecord {
   const data = loadData();
   const user: UserRecord = {
     id: randomUUID(),
     username: username.trim().toLowerCase(),
+    passHash,
     balance: startingBalance,
     totalWagered: 0,
     totalPayout: 0,
@@ -521,8 +677,8 @@ export function listUsers(limit = 200): UserRecord[] {
 
 export function countUsers(where?: { isBanned?: boolean }): number {
   const users = loadData().users;
-  if (!where?.isBanned === undefined) return users.length;
-  return users.filter((u) => u.isBanned === where?.isBanned).length;
+  if (!where) return users.length;
+  return users.filter((u) => u.isBanned === where.isBanned).length;
 }
 
 // ── Apuestas ─────────────────────────────────────────────────
@@ -640,7 +796,6 @@ export function getGameConfig(game: GameId): GameConfigRecord {
   if (!cfg) {
     seedGameConfigs(data);
     cfg = data.gameConfigs.find((c) => c.game === game)!;
-    scheduleSave();
   }
   return cfg;
 }
@@ -648,7 +803,6 @@ export function getGameConfig(game: GameId): GameConfigRecord {
 export function listGameConfigs(): GameConfigRecord[] {
   const data = loadData();
   seedGameConfigs(data);
-  scheduleSave();
   return [...data.gameConfigs].sort(
     (a, b) => (GAMES as readonly string[]).indexOf(a.game) - (GAMES as readonly string[]).indexOf(b.game),
   );

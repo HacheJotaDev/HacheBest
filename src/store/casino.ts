@@ -92,29 +92,13 @@ export interface SessionActData {
   reason?: string;
 }
 
-const SESSION_KEY = "hachebest.session";
-
-function readSession(): { id: string } | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { id?: string };
-    return parsed?.id ? { id: parsed.id } : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeSession(user: CasinoUser | null) {
-  if (typeof window === "undefined") return;
-  if (user) window.localStorage.setItem(SESSION_KEY, JSON.stringify({ id: user.id }));
-  else window.localStorage.removeItem(SESSION_KEY);
-}
+const NEXT_PAGE = "/login";
 
 interface CasinoState {
   hydrated: boolean;
   user: CasinoUser | null;
+  /** La cuenta de la sesión actual está suspendida (403) */
+  suspendido: boolean;
   view: View;
   activeGame: string | null;
   gamesConfig: GameConfigPublic[];
@@ -123,8 +107,11 @@ interface CasinoState {
   abierta: boolean;
 
   hydrate: () => Promise<void>;
-  login: (username: string) => Promise<{ ok: boolean; error?: string; isNew?: boolean }>;
-  logout: () => void;
+  login: (
+    username: string,
+    password: string,
+  ) => Promise<{ ok: boolean; error?: string; isNew?: boolean; claimed?: boolean }>;
+  logout: () => Promise<void>;
   setBalance: (balance: number) => void;
   refreshUser: () => Promise<void>;
   resetBalance: () => Promise<{ ok: boolean; error?: string }>;
@@ -162,6 +149,7 @@ interface CasinoState {
 export const useCasino = create<CasinoState>((set, get) => ({
   hydrated: false,
   user: null,
+  suspendido: false,
   view: "casino",
   activeGame: null,
   gamesConfig: [],
@@ -169,35 +157,44 @@ export const useCasino = create<CasinoState>((set, get) => ({
   abierta: true,
 
   hydrate: async () => {
-    const session = readSession();
-    if (session) {
-      const res = await api<{ user: CasinoUser }>(`/api/user?id=${encodeURIComponent(session.id)}`);
-      if (res.ok) {
-        set({ user: res.data.user });
-        writeSession(res.data.user);
-      } else {
-        writeSession(null);
-      }
+    // La sesión vive en una cookie httpOnly: el servidor es el que sabe
+    const res = await api<{ user: CasinoUser }>("/api/auth/me");
+    if (res.ok) {
+      set({ user: res.data.user, suspendido: false, hydrated: true });
+      void get().loadGames();
+      void get().refreshBets();
+      return;
     }
     set({ hydrated: true });
-    void get().loadGames();
-    if (get().user) void get().refreshBets();
+    if (res.status === 403) {
+      // Cuenta suspendida: aviso en pantalla (sin bucle de redirecciones)
+      set({ user: null, suspendido: true });
+      return;
+    }
+    // Sin sesión (401) o error: al login — el proxy ya redirige, esto
+    // cubre pestañas antiguas y sesiones expiradas
+    if (typeof window !== "undefined") window.location.replace(NEXT_PAGE);
   },
 
-  login: async (username) => {
-    const res = await api<{ user: CasinoUser; isNew: boolean }>("/api/user", {
-      body: { username },
-    });
+  login: async (username, password) => {
+    const res = await api<{ user: CasinoUser; isNew: boolean; claimed?: boolean }>(
+      "/api/auth/login",
+      { body: { username, password } },
+    );
     if (!res.ok) return { ok: false, error: res.error };
     set({ user: res.data.user });
-    writeSession(res.data.user);
     void get().refreshBets();
-    return { ok: true, isNew: res.data.isNew };
+    return { ok: true, isNew: res.data.isNew, claimed: res.data.claimed };
   },
 
-  logout: () => {
-    writeSession(null);
-    set({ user: null, bets: [], view: "casino", activeGame: null });
+  logout: async () => {
+    try {
+      await api("/api/auth/logout", { body: {} });
+    } catch {
+      // aunque falle la llamada, la sesión local se limpia igual
+    }
+    set({ user: null, bets: [], view: "casino", activeGame: null, suspendido: false });
+    if (typeof window !== "undefined") window.location.replace(NEXT_PAGE);
   },
 
   setBalance: (balance) => {
@@ -206,16 +203,14 @@ export const useCasino = create<CasinoState>((set, get) => ({
   },
 
   refreshUser: async () => {
-    const u = get().user;
-    if (!u) return;
-    const res = await api<{ user: CasinoUser }>(`/api/user?id=${encodeURIComponent(u.id)}`);
+    const res = await api<{ user: CasinoUser }>("/api/auth/me");
     if (res.ok) set({ user: res.data.user });
   },
 
   resetBalance: async () => {
     const u = get().user;
     if (!u) return { ok: false, error: "Sin sesión" };
-    const res = await api<{ user: CasinoUser }>("/api/user/reset", { body: { userId: u.id } });
+    const res = await api<{ user: CasinoUser }>("/api/user/reset", { body: {} });
     if (!res.ok) return { ok: false, error: res.error };
     set({ user: res.data.user });
     return { ok: true };
@@ -232,9 +227,7 @@ export const useCasino = create<CasinoState>((set, get) => ({
   },
 
   refreshBets: async () => {
-    const u = get().user;
-    if (!u) return;
-    const res = await api<{ bets: BetRecord[] }>(`/api/bets?userId=${encodeURIComponent(u.id)}&limit=30`);
+    const res = await api<{ bets: BetRecord[] }>("/api/bets?limit=30");
     if (res.ok) set({ bets: res.data.bets });
   },
 
@@ -242,8 +235,9 @@ export const useCasino = create<CasinoState>((set, get) => ({
     const u = get().user;
     if (!u) return { ok: false, error: "Inicia sesión para jugar" };
     // Endpoint propio por juego: POST /api/games/<juego>
+    // El servidor identifica al jugador por la cookie de sesión
     const res = await api<PlayResponse>(`/api/games/${game}`, {
-      body: { userId: u.id, betType, amount, extra },
+      body: { betType, amount, extra },
     });
     if (!res.ok) return { ok: false, error: res.error };
     set((s) => (s.user ? { user: { ...s.user, balance: res.data.balance } } : {}));
@@ -255,7 +249,7 @@ export const useCasino = create<CasinoState>((set, get) => ({
     const u = get().user;
     if (!u) return { ok: false, error: "Inicia sesión para jugar" };
     const res = await api<{ betId: string; balance: number }>("/api/games/tictactoe", {
-      body: { userId: u.id, action: "start", amount },
+      body: { action: "start", amount },
     });
     if (!res.ok) return { ok: false, error: res.error };
     get().setBalance(res.data.balance);
@@ -266,7 +260,7 @@ export const useCasino = create<CasinoState>((set, get) => ({
     const u = get().user;
     if (!u) return { ok: false, error: "Sin sesión" };
     const res = await api<TttMoveData>("/api/games/tictactoe", {
-      body: { userId: u.id, action: "move", betId, cell },
+      body: { action: "move", betId, cell },
     });
     if (!res.ok) return { ok: false, error: res.error };
     get().setBalance(res.data.balance);
@@ -278,7 +272,7 @@ export const useCasino = create<CasinoState>((set, get) => ({
     const u = get().user;
     if (!u) return { ok: false, error: "Inicia sesión para jugar" };
     const res = await api<SessionStartData>(`/api/games/${game}`, {
-      body: { userId: u.id, action: "start", amount, extra },
+      body: { action: "start", amount, extra },
     });
     if (!res.ok) return { ok: false, error: res.error };
     get().setBalance(res.data.balance);
@@ -289,7 +283,7 @@ export const useCasino = create<CasinoState>((set, get) => ({
     const u = get().user;
     if (!u) return { ok: false, error: "Sin sesión" };
     const res = await api<SessionActData>(`/api/games/${game}`, {
-      body: { userId: u.id, action: "act", betId, act, extra },
+      body: { action: "act", betId, act, extra },
     });
     if (!res.ok) return { ok: false, error: res.error };
     get().setBalance(res.data.balance);

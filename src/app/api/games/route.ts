@@ -1,4 +1,5 @@
 import { listGameConfigs } from "@/lib/db";
+import { requireUser } from "@/lib/auth";
 import { GAMES, parseConfig } from "@/lib/games";
 import {
   betCeiling,
@@ -8,9 +9,11 @@ import {
   representativeCeiling,
 } from "@/lib/house";
 
-/** GET /api/games — catálogo y configuración pública de los juegos */
-export async function GET() {
+/** GET /api/games — catálogo y configuración de los juegos (con sesión) */
+export async function GET(req: Request) {
   try {
+    const auth = await requireUser(req);
+    if (!auth.ok) return auth.error;
     const abierta = houseIsOpen();
     const bank = houseBankSnapshot();
     const games = listGameConfigs().map((cfg) => {

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { checkAdmin, unauthorized } from "@/lib/admin";
+import { refreshFromRemote, settle } from "@/lib/db";
 import {
   houseBankSnapshot,
   recapitalizeHouse,
@@ -14,6 +15,17 @@ import {
  */
 export async function POST(req: NextRequest) {
   if (!(await checkAdmin(req))) return unauthorized();
+  // La banca mueve dinero real (demo): sincroniza antes y confirma el
+  // guardado antes de responder (serverless no puede perderla).
+  await refreshFromRemote();
+  try {
+    return await bankInner(req);
+  } finally {
+    await settle();
+  }
+}
+
+async function bankInner(req: NextRequest): Promise<Response> {
   try {
     const body = (await req.json()) as { action?: string; amount?: number };
     const amount = Number(body.amount);

@@ -1,10 +1,19 @@
 import { NextRequest } from "next/server";
 import { checkAdmin, getAdminPassword, unauthorized } from "@/lib/admin";
-import { getSetting, setSetting } from "@/lib/db";
+import { getSetting, refreshFromRemote, setSetting, settle } from "@/lib/db";
 
 /** PUT /api/admin/settings — cambiar contraseña del panel */
 export async function PUT(req: NextRequest) {
   if (!(await checkAdmin(req))) return unauthorized();
+  await refreshFromRemote();
+  try {
+    return await putInner(req);
+  } finally {
+    await settle();
+  }
+}
+
+async function putInner(req: NextRequest): Promise<Response> {
   try {
     const { currentPassword, newPassword } = (await req.json()) as {
       currentPassword?: string;

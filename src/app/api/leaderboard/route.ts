@@ -1,9 +1,12 @@
 import { ensureHydrated, listUsers } from "@/lib/db";
+import { requireUser } from "@/lib/auth";
 import { ROUND2 } from "@/lib/games";
 
-/** GET /api/leaderboard — top 10 por saldo (solo usuarios con apuestas) */
-export async function GET() {
+/** GET /api/leaderboard — top 10 por saldo (solo usuarios con apuestas, con sesión) */
+export async function GET(req: Request) {
   try {
+    const auth = await requireUser(req);
+    if (!auth.ok) return auth.error;
     await ensureHydrated();
     const users = listUsers(500)
       .filter((u) => u.betsCount > 0 && !u.isBanned)

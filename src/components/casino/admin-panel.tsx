@@ -97,6 +97,7 @@ interface AdminBet {
 interface AdminUser {
   id: string;
   username: string;
+  hasPassword: boolean;
   balance: number;
   totalWagered: number;
   betsCount: number;
@@ -431,7 +432,11 @@ function UsersTab({ adminKey, active }: { adminKey: string; active: boolean }) {
     return () => clearTimeout(t);
   }, [load, active]);
 
-  const act = async (userId: string, action: "ban" | "unban" | "reset" | "setBalance", value?: number) => {
+  const act = async (
+    userId: string,
+    action: "ban" | "unban" | "reset" | "setBalance" | "resetPassword",
+    value?: number,
+  ) => {
     const res = await api<{ user: AdminUser }>("/api/admin/users", {
       method: "PATCH",
       body: { userId, action, value },
@@ -442,7 +447,11 @@ function UsersTab({ adminKey, active }: { adminKey: string; active: boolean }) {
       return;
     }
     setUsers((us) => us.map((u) => (u.id === userId ? res.data.user : u)));
-    toast.success("Usuario actualizado");
+    toast.success(
+      action === "resetPassword"
+        ? "Contraseña eliminada: el jugador la define la próxima vez que entre"
+        : "Usuario actualizado",
+    );
   };
 
   if (loading && users.length === 0) {
@@ -510,6 +519,17 @@ function UsersTab({ adminKey, active }: { adminKey: string; active: boolean }) {
                     >
                       <RotateCcw className="size-3.5" aria-hidden />
                     </Button>
+                    {u.hasPassword && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 px-2"
+                        onClick={() => void act(u.id, "resetPassword")}
+                        title="Quitar contraseña (el jugador la define al entrar de nuevo)"
+                      >
+                        <KeyRound className="size-3.5" aria-hidden />
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       variant={u.isBanned ? "secondary" : "destructive"}

@@ -5,9 +5,12 @@ import {
   getGameConfig,
   getUser,
   insertBet,
+  refreshFromRemote,
+  settle,
   updateBet,
   updateUser,
 } from "@/lib/db";
+import { requireUser } from "@/lib/auth";
 import {
   GAMES,
   parseConfig,
@@ -40,14 +43,12 @@ import {
 // ─────────────────────────────────────────────────────────────
 
 interface PlayBody {
-  userId?: string;
   betType?: string;
   amount?: number;
   extra?: Record<string, unknown>;
 }
 
 interface SessionBody {
-  userId?: string;
   action?: "start" | "act";
   amount?: number;
   betId?: string;
@@ -56,6 +57,22 @@ interface SessionBody {
 }
 
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
+
+/**
+ * Envoltorio de PERSISTENCIA para todo endpoint que escribe datos:
+ *  · ANTES — sincroniza la memoria con PostgreSQL (una instancia
+ *    caliente con memoria vieja ya no pisa datos de otra).
+ *  · DESPUÉS — espera a que el guardado esté CONFIRMADO en la base
+ *    antes de enviar la respuesta: serverless no puede perderla.
+ */
+async function withPersistence(run: () => Promise<Response>): Promise<Response> {
+  await refreshFromRemote();
+  try {
+    return await run();
+  } finally {
+    await settle();
+  }
+}
 
 /**
  * Comprobación de BANCA: ¿puede la casa aceptar esta apuesta?
@@ -90,12 +107,15 @@ type UserCheck = { ok: false; error: Response } | { ok: true; user: UserRow };
 
 type UserRow = NonNullable<ReturnType<typeof getUser>>;
 
-function checkUser(userId: string | undefined): UserCheck {
-  if (!userId) return { ok: false, error: bad("Falta el identificador de usuario") };
-  const user = getUser(userId);
-  if (!user) return { ok: false, error: bad("Usuario no encontrado", 404) };
-  if (user.isBanned) return { ok: false, error: bad("Cuenta suspendida", 403) };
-  return { ok: true, user };
+/**
+ * El usuario SIEMPRE sale de la cookie de sesión (nunca del body).
+ * El proxy ya bloquea sin sesión; esto es la segunda línea de defensa
+ * y además comprueba suspensiones.
+ */
+async function checkUser(req: NextRequest): Promise<UserCheck> {
+  const auth = await requireUser(req);
+  if (!auth.ok) return { ok: false, error: auth.error };
+  return { ok: true, user: auth.user };
 }
 
 /** Actualiza stats del usuario y paga el resultado (en memoria, atómico) */
@@ -156,16 +176,21 @@ function settlePendingBet(
 
 // ── JUEGOS INSTANTÁNEOS ──────────────────────────────────────
 
-export async function handleInstantGame(game: GameId, req: NextRequest): Promise<Response> {
+/** POST /api/games/<juego> — apuestas instantáneas (13 juegos) */
+export function handleInstantGame(game: GameId, req: NextRequest): Promise<Response> {
+  return withPersistence(() => instantGame(game, req));
+}
+
+async function instantGame(game: GameId, req: NextRequest): Promise<Response> {
   try {
     const body = (await req.json()) as PlayBody;
-    const { userId, betType = "", amount } = body;
+    const { betType = "", amount } = body;
     const extra = body.extra ?? {};
 
     if (amount === undefined) return bad("Falta el importe de la apuesta");
     if (!(GAMES as readonly string[]).includes(game)) return bad("Juego desconocido");
 
-    const check = checkUser(userId);
+    const check = await checkUser(req);
     if (!check.ok) return check.error;
     const user = check.user;
 
@@ -217,16 +242,21 @@ export async function handleInstantGame(game: GameId, req: NextRequest): Promise
 
 // ── JUEGOS DE SESIÓN (multi-fase) ────────────────────────────
 
-export async function handleSessionGame(game: SessionGameId, req: NextRequest): Promise<Response> {
+/** POST /api/games/<juego> — partidas multi-fase (blackjack, mayor/menor) */
+export function handleSessionGame(game: SessionGameId, req: NextRequest): Promise<Response> {
+  return withPersistence(() => sessionGame(game, req));
+}
+
+async function sessionGame(game: SessionGameId, req: NextRequest): Promise<Response> {
   try {
     const body = (await req.json()) as SessionBody;
-    const { userId, action, amount, betId, act } = body;
+    const { action, amount, betId, act } = body;
     const extra = body.extra ?? {};
 
     if (!isSessionGame(game)) return bad("Juego de sesión desconocido");
     if (!action) return bad("Falta la acción");
 
-    const check = checkUser(userId);
+    const check = await checkUser(req);
     if (!check.ok) return check.error;
     const user = check.user;
 
@@ -424,19 +454,23 @@ function finishTtt(
   });
 }
 
-export async function handleTictactoe(req: NextRequest): Promise<Response> {
+/** POST /api/games/tictactoe — 3 en raya TODO en el servidor */
+export function handleTictactoe(req: NextRequest): Promise<Response> {
+  return withPersistence(() => tictactoeGame(req));
+}
+
+async function tictactoeGame(req: NextRequest): Promise<Response> {
   try {
     const body = (await req.json()) as {
-      userId?: string;
       action?: "start" | "move";
       amount?: number;
       betId?: string;
       cell?: number;
     };
-    const { userId, action, amount, betId, cell } = body;
-    if (!userId || !action) return bad("Faltan parámetros");
+    const { action, amount, betId, cell } = body;
+    if (!action) return bad("Faltan parámetros");
 
-    const check = checkUser(userId);
+    const check = await checkUser(req);
     if (!check.ok) return check.error;
     const user = check.user;
 

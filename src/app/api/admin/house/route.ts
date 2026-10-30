@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { checkAdmin, unauthorized } from "@/lib/admin";
+import { refreshFromRemote, settle } from "@/lib/db";
 import {
   effectiveUserWinRate,
   getHouseSettings,
@@ -32,6 +33,15 @@ export async function GET(req: NextRequest) {
 /** PUT /api/admin/house — configurar 50/50 y protección de la banca */
 export async function PUT(req: NextRequest) {
   if (!(await checkAdmin(req))) return unauthorized();
+  await refreshFromRemote();
+  try {
+    return await putInner(req);
+  } finally {
+    await settle();
+  }
+}
+
+async function putInner(req: NextRequest): Promise<Response> {
   try {
     const body = (await req.json()) as {
       userWinPercent?: number;
