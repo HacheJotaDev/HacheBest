@@ -11,6 +11,15 @@ import { MonedaGame } from "./games/moneda";
 import { DadoGame } from "./games/dado";
 import { TictactoeGame } from "./games/tictactoe";
 import { PptGame } from "./games/ppt";
+import { RuletaGame } from "./games/ruleta";
+import { TragamonedasGame } from "./games/tragamonedas";
+import { RuedaGame } from "./games/rueda";
+import { PlinkoGame } from "./games/plinko";
+import { CartaAltaGame } from "./games/cartaalta";
+import { MayorMenorGame } from "./games/mayormenor";
+import { BlackjackGame } from "./games/blackjack";
+import { MinesGame } from "./games/mines";
+import { CrashGame } from "./games/crash";
 
 /** Panel del juego activo con cabecera y límites */
 export function GamePanel() {
@@ -34,6 +43,24 @@ export function GamePanel() {
         return <TictactoeGame />;
       case "ppt":
         return <PptGame />;
+      case "ruleta":
+        return <RuletaGame />;
+      case "tragamonedas":
+        return <TragamonedasGame />;
+      case "rueda":
+        return <RuedaGame />;
+      case "plinko":
+        return <PlinkoGame />;
+      case "cartaalta":
+        return <CartaAltaGame />;
+      case "mayormenor":
+        return <MayorMenorGame />;
+      case "blackjack":
+        return <BlackjackGame />;
+      case "mines":
+        return <MinesGame />;
+      case "crash":
+        return <CrashGame />;
       default:
         return null;
     }

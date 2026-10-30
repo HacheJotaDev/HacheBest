@@ -3,11 +3,19 @@
 import { motion } from "framer-motion";
 import {
   ArrowRight,
+  ArrowUpDown,
   Binary,
+  Bomb,
+  CircleDot,
   Coins,
+  FerrisWheel,
   Grid3x3,
   Hand,
+  Spade,
+  Swords,
   Target,
+  TrendingUp,
+  Triangle,
   Wrench,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -22,13 +30,38 @@ const GAME_META: Record<string, { icon: React.ElementType; tint: string; maxWin:
   dado: { icon: Hand, tint: "text-violet-400 bg-violet-500/10 border-violet-500/30", maxWin: "×49,5" },
   tictactoe: { icon: Grid3x3, tint: "text-sky-400 bg-sky-500/10 border-sky-500/30", maxWin: "×2,5" },
   ppt: { icon: Coins, tint: "text-orange-400 bg-orange-500/10 border-orange-500/30", maxWin: "×2,9" },
+  ruleta: { icon: CircleDot, tint: "text-red-400 bg-red-500/10 border-red-500/30", maxWin: "×36" },
+  tragamonedas: { icon: Coins, tint: "text-pink-400 bg-pink-500/10 border-pink-500/30", maxWin: "×50" },
+  rueda: { icon: FerrisWheel, tint: "text-gold bg-amber-500/10 border-amber-500/30", maxWin: "×5" },
+  plinko: { icon: Triangle, tint: "text-lime-400 bg-lime-500/10 border-lime-500/30", maxWin: "×170" },
+  cartaalta: { icon: Swords, tint: "text-rose-400 bg-rose-500/10 border-rose-500/30", maxWin: "×2,05" },
+  mayormenor: { icon: ArrowUpDown, tint: "text-teal-400 bg-teal-500/10 border-teal-500/30", maxWin: "×12,87" },
+  blackjack: { icon: Spade, tint: "text-zinc-200 bg-zinc-500/10 border-zinc-400/30", maxWin: "×2,5" },
+  mines: { icon: Bomb, tint: "text-orange-400 bg-orange-500/10 border-orange-500/30", maxWin: "×24,75" },
+  crash: { icon: TrendingUp, tint: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30", maxWin: "×5000" },
 };
 
 /** Lobby con las tarjetas de todos los juegos */
 export function Lobby() {
   const gamesConfig = useCasino((s) => s.gamesConfig);
   const setActiveGame = useCasino((s) => s.setActiveGame);
-  const ordered = ["parimpar", "exacto", "moneda", "dado", "tictactoe", "ppt"]
+  const ordered = [
+    "crash",
+    "mines",
+    "blackjack",
+    "ruleta",
+    "plinko",
+    "tragamonedas",
+    "mayormenor",
+    "rueda",
+    "cartaalta",
+    "parimpar",
+    "exacto",
+    "moneda",
+    "dado",
+    "tictactoe",
+    "ppt",
+  ]
     .map((g) => gamesConfig.find((c) => c.game === g))
     .filter((c): c is NonNullable<typeof c> => Boolean(c));
 
@@ -114,4 +147,13 @@ const DESCS: Record<string, string> = {
   dado: "Ajusta tu objetivo y tu riesgo: mayor o menor que la tirada.",
   tictactoe: "Duelo contra la IA en 3 en raya con apuesta: ganar paga, empatar devuelve.",
   ppt: "Piedra, papel o tijera contra la casa. El empate devuelve tu apuesta.",
+  ruleta: "Ruleta europea con plenos, colores, paridades, mitades y docenas.",
+  tragamonedas: "Tres rodillos de la suerte: el 7 seguido paga hasta 50 veces.",
+  rueda: "26 segmentos: quiebra, premios pequeños… y un 5x escondido.",
+  plinko: "Deja caer la bola entre los pinchos: los bordes pagan fortunas.",
+  cartaalta: "Tu carta contra la de la casa. La más alta se lleva el premio.",
+  mayormenor: "Cadena de cartas: mayor o igual, menor o igual… retírate cuando quieras.",
+  blackjack: "Llega a 21 y vence al crupier. Doblar, pedir o plantarse.",
+  mines: "Revela gemas esquivando las minas y retírate antes de explotar.",
+  crash: "El multiplicador sube sin parar… retírate antes del crash.",
 };

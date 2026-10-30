@@ -54,6 +54,30 @@ export interface PlayResponse {
   reason?: string;
 }
 
+export type SessionPublicState = Record<string, unknown>;
+
+export interface SessionStartData {
+  betId: string;
+  balance: number;
+  state?: SessionPublicState;
+  /** Blackjack: la mano puede liquidarse al repartir (naturals) */
+  settled?: PlayResponse;
+  serverNow?: number;
+}
+
+export interface SessionActData {
+  settled: boolean;
+  balance: number;
+  outcome?: string;
+  multiplier?: number;
+  payout?: number;
+  profit?: number;
+  result?: Record<string, unknown>;
+  state?: SessionPublicState;
+  serverNow?: number;
+  reason?: string;
+}
+
 const SESSION_KEY = "hachebest.session";
 
 function readSession(): { id: string } | null {
@@ -102,6 +126,18 @@ interface CasinoState {
 
   tttStart: (amount: number) => Promise<{ ok: true; data: { betId: string; balance: number } } | { ok: false; error: string }>;
   tttSettle: (betId: string, board: string[]) => Promise<{ ok: true; data: PlayResponse } | { ok: false; error: string }>;
+
+  sessionStart: (
+    game: string,
+    amount: number,
+    extra?: Record<string, unknown>,
+  ) => Promise<{ ok: true; data: SessionStartData } | { ok: false; error: string }>;
+  sessionAct: (
+    game: string,
+    betId: string,
+    act: string,
+    extra?: Record<string, unknown>,
+  ) => Promise<{ ok: true; data: SessionActData } | { ok: false; error: string }>;
 }
 
 export const useCasino = create<CasinoState>((set, get) => ({
@@ -212,6 +248,29 @@ export const useCasino = create<CasinoState>((set, get) => ({
     if (!res.ok) return { ok: false, error: res.error };
     get().setBalance(res.data.balance);
     void get().refreshBets();
+    return { ok: true, data: res.data };
+  },
+
+  sessionStart: async (game, amount, extra) => {
+    const u = get().user;
+    if (!u) return { ok: false, error: "Inicia sesión para jugar" };
+    const res = await api<SessionStartData>("/api/game/session", {
+      body: { userId: u.id, game, action: "start", amount, extra },
+    });
+    if (!res.ok) return { ok: false, error: res.error };
+    get().setBalance(res.data.balance);
+    return { ok: true, data: res.data };
+  },
+
+  sessionAct: async (game, betId, act, extra) => {
+    const u = get().user;
+    if (!u) return { ok: false, error: "Sin sesión" };
+    const res = await api<SessionActData>("/api/game/session", {
+      body: { userId: u.id, game, action: "act", betId, act, extra },
+    });
+    if (!res.ok) return { ok: false, error: res.error };
+    get().setBalance(res.data.balance);
+    if (res.data.settled) void get().refreshBets();
     return { ok: true, data: res.data };
   },
 }));

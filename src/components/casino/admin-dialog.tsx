@@ -369,6 +369,16 @@ const CONFIG_LABELS: Record<string, string> = {
   winMultiplier: "Multiplicador victoria",
   houseEdge: "Ventaja casa (%)",
   drawRefund: "Empate devuelve",
+  pleno: "Pago pleno",
+  doble: "Pago simple",
+  docena: "Pago docena",
+  maxPrize: "Premio máximo",
+  segments: "Segmentos",
+  rows: "Filas",
+  blackjackPays: "Blackjack paga",
+  winPays: "Victoria paga",
+  edge: "Ventaja casa (%)",
+  growth: "Velocidad (%/s)",
 };
 
 function GamesTab({ adminKey, active }: { adminKey: string; active: boolean }) {

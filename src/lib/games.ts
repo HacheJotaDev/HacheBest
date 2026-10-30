@@ -13,6 +13,15 @@ export const GAMES = [
   "dado",
   "tictactoe",
   "ppt",
+  "ruleta",
+  "tragamonedas",
+  "rueda",
+  "plinko",
+  "cartaalta",
+  "mayormenor",
+  "blackjack",
+  "mines",
+  "crash",
 ] as const;
 
 export type GameId = (typeof GAMES)[number];
@@ -27,6 +36,15 @@ export const DEFAULT_GAME_CONFIG: Record<
   dado: { name: "Dado", configJson: { houseEdge: 1 } }, // multiplicador = (100-edge)/chance
   tictactoe: { name: "3 en Raya", configJson: { winMultiplier: 2.5 } },
   ppt: { name: "Piedra, Papel o Tijera", configJson: { winMultiplier: 2.9, drawRefund: true } },
+  ruleta: { name: "Ruleta", configJson: { pleno: 36, doble: 2, docena: 3 } },
+  tragamonedas: { name: "Tragamonedas", configJson: { maxPrize: 50 } },
+  rueda: { name: "Rueda de la Fortuna", configJson: { segments: 26 } },
+  plinko: { name: "Plinko", configJson: { rows: 12 } },
+  cartaalta: { name: "Carta Más Alta", configJson: { winMultiplier: 2.05 } },
+  mayormenor: { name: "Mayor o Menor", configJson: { houseEdge: 1 } },
+  blackjack: { name: "Blackjack", configJson: { blackjackPays: 2.5, winPays: 2 } },
+  mines: { name: "Mines", configJson: { edge: 1 } },
+  crash: { name: "Crash", configJson: { growth: 8, houseEdge: 1 } },
 };
 
 export const ROUND2 = (n: number) => Math.round(n * 100) / 100;
@@ -71,6 +89,25 @@ export function validateBet(game: GameId, betType: string, extra?: Record<string
     }
     case "ppt":
       return ["piedra", "papel", "tijera"].includes(betType) ? null : "Elige una figura";
+    case "ruleta": {
+      const ok = ["pleno", "rojo", "negro", "par", "impar", "bajo", "alto", "docena1", "docena2", "docena3"].includes(betType);
+      if (!ok) return "Elige un tipo de apuesta válido";
+      if (betType === "pleno") {
+        const n = Number(extra?.number);
+        if (!Number.isInteger(n) || n < 0 || n > 36) return "Elige un número entre 0 y 36";
+      }
+      return null;
+    }
+    case "tragamonedas":
+      return betType === "girar" ? null : "Gira los rodillos";
+    case "rueda":
+      return betType === "girar" ? null : "Gira la rueda";
+    case "plinko": {
+      if (betType !== "drop") return "Suelta la bola";
+      return ["bajo", "medio", "alto"].includes(String(extra?.risk)) ? null : "Elige el nivel de riesgo";
+    }
+    case "cartaalta":
+      return betType === "jugar" ? null : "Apuesta inválida";
     default:
       return "Juego no soportado en apuesta instantánea";
   }
@@ -90,6 +127,16 @@ export function playInstant(game: GameId, ctx: Ctx): PlayResult {
       return playDado(ctx);
     case "ppt":
       return playPpt(ctx);
+    case "ruleta":
+      return playRuleta(ctx);
+    case "tragamonedas":
+      return playTragamonedas(ctx);
+    case "rueda":
+      return playRueda(ctx);
+    case "plinko":
+      return playPlinko(ctx);
+    case "cartaalta":
+      return playCartaAlta(ctx);
     default:
       throw new Error("Juego no soportado");
   }
@@ -182,6 +229,147 @@ function playPpt(ctx: Ctx): PlayResult {
     return win(ctx, Number(ctx.cfg.winMultiplier ?? 2.9), resultJson);
   }
   return lose(resultJson, ctx.betType, ctx.amount);
+}
+
+/** win si mult > 1 · draw (devolución) si mult = 1 · lose (retorno parcial) si mult < 1 */
+function settleByMultiplier(ctx: Ctx, multiplier: number, resultJson: object): PlayResult {
+  const payout = ROUND2(ctx.amount * multiplier);
+  const outcome: PlayResult["outcome"] = multiplier > 1 ? "win" : multiplier === 1 ? "draw" : "lose";
+  return { outcome, multiplier, payout, betType: ctx.betType, resultJson };
+}
+
+// ── RULETA europea ───────────────────────────────────────────
+function playRuleta(ctx: Ctx): PlayResult {
+  const n = randomInt(0, 37);
+  const color = rouletteColor(n);
+  const bt = ctx.betType;
+  let won = false;
+  let multiplier = Number(ctx.cfg.doble ?? 2);
+  switch (bt) {
+    case "pleno":
+      multiplier = Number(ctx.cfg.pleno ?? 36);
+      won = n === Number(ctx.extra?.number);
+      break;
+    case "rojo":
+      won = color === "rojo";
+      break;
+    case "negro":
+      won = color === "negro";
+      break;
+    case "par":
+      won = n !== 0 && n % 2 === 0;
+      break;
+    case "impar":
+      won = n % 2 === 1;
+      break;
+    case "bajo":
+      won = n >= 1 && n <= 18;
+      break;
+    case "alto":
+      won = n >= 19;
+      break;
+    case "docena1":
+      multiplier = Number(ctx.cfg.docena ?? 3);
+      won = n >= 1 && n <= 12;
+      break;
+    case "docena2":
+      multiplier = Number(ctx.cfg.docena ?? 3);
+      won = n >= 13 && n <= 24;
+      break;
+    case "docena3":
+      multiplier = Number(ctx.cfg.docena ?? 3);
+      won = n >= 25 && n <= 36;
+      break;
+  }
+  const resultJson = { number: n, color, bet: bt, picked: bt === "pleno" ? Number(ctx.extra?.number) : null };
+  return won
+    ? { outcome: "win", multiplier, payout: ROUND2(ctx.amount * multiplier), betType: bt, resultJson }
+    : { outcome: "lose", multiplier: 0, payout: 0, betType: bt, resultJson };
+}
+
+// ── TRAGAMONEDAS ─────────────────────────────────────────────
+export const SLOT_SYMBOLS = [
+  { id: "cereza", weight: 5, triple: 4 },
+  { id: "limon", weight: 4, triple: 6 },
+  { id: "campana", weight: 3, triple: 10 },
+  { id: "estrella", weight: 2, triple: 15 },
+  { id: "diamante", weight: 1, triple: 40 },
+  { id: "siete", weight: 1, triple: 50 },
+] as const;
+
+function playTragamonedas(ctx: Ctx): PlayResult {
+  const pool: string[] = [];
+  for (const s of SLOT_SYMBOLS) {
+    for (let i = 0; i < s.weight; i++) pool.push(s.id);
+  }
+  const pick = () => pool[randomInt(0, pool.length)] ?? "cereza";
+  const reels = [pick(), pick(), pick()];
+  let multiplier = 0;
+  if (reels[0] === reels[1] && reels[1] === reels[2]) {
+    multiplier = SLOT_SYMBOLS.find((s) => s.id === reels[0])?.triple ?? 0;
+  } else {
+    const counts = new Map<string, number>();
+    for (const r of reels) counts.set(r, (counts.get(r) ?? 0) + 1);
+    const duplicated = [...counts.entries()].find(([, v]) => v === 2)?.[0];
+    if (duplicated) multiplier = duplicated === "cereza" ? 2.5 : 0.5;
+  }
+  return settleByMultiplier(ctx, multiplier, { reels, multiplier });
+}
+
+// ── RUEDA DE LA FORTUNA ──────────────────────────────────────
+// 26 segmentos: 14 quiebras (×0), 6×1.5, 4×2, 1×3, 1×5 → retorno teórico ≈ 96 %
+export const RUEDA_SEGMENTS: number[] = [
+  0, 1.5, 0, 2, 0, 1.5, 0, 3, 0, 1.5, 0, 2, 0, 1.5, 0, 5, 0, 1.5, 0, 2, 0, 1.5, 0, 2, 0, 0,
+];
+
+function playRueda(ctx: Ctx): PlayResult {
+  const index = randomInt(0, RUEDA_SEGMENTS.length);
+  const multiplier = RUEDA_SEGMENTS[index] ?? 0;
+  return settleByMultiplier(ctx, multiplier, { index, multiplier });
+}
+
+// ── PLINKO ───────────────────────────────────────────────────
+export const PLINKO_ROWS = 12;
+export const PLINKO_TABLES: Record<"bajo" | "medio" | "alto", number[]> = {
+  bajo: [10, 3, 1.6, 1.4, 1.1, 1, 0.5, 1, 1.1, 1.4, 1.6, 3, 10],
+  medio: [33, 11, 4, 2, 1.1, 0.6, 0.3, 0.6, 1.1, 2, 4, 11, 33],
+  alto: [170, 24, 8.1, 2, 0.7, 0.2, 0.2, 0.2, 0.7, 2, 8.1, 24, 170],
+};
+
+function playPlinko(ctx: Ctx): PlayResult {
+  const riskRaw = String(ctx.extra?.risk ?? "medio");
+  const risk = riskRaw === "bajo" || riskRaw === "alto" ? riskRaw : "medio";
+  const path: number[] = [];
+  let bucket = 0;
+  for (let i = 0; i < PLINKO_ROWS; i++) {
+    const step = randomInt(0, 2);
+    path.push(step);
+    bucket += step;
+  }
+  const table = PLINKO_TABLES[risk];
+  const multiplier = table[bucket] ?? 0;
+  return settleByMultiplier(ctx, multiplier, { path, bucket, risk, multiplier, rows: PLINKO_ROWS });
+}
+
+// ── CARTA MÁS ALTA ───────────────────────────────────────────
+const CARD_RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"] as const;
+const CARD_SUITS = ["♠", "♥", "♦", "♣"] as const;
+
+function drawCard(): string {
+  const r = CARD_RANKS[randomInt(0, CARD_RANKS.length)] ?? "A";
+  const s = CARD_SUITS[randomInt(0, CARD_SUITS.length)] ?? "♠";
+  return r + s;
+}
+
+function playCartaAlta(ctx: Ctx): PlayResult {
+  const player = drawCard();
+  const house = drawCard();
+  const pv = CARD_RANKS.indexOf((player.slice(0, -1) ?? "A") as (typeof CARD_RANKS)[number]);
+  const hv = CARD_RANKS.indexOf((house.slice(0, -1) ?? "A") as (typeof CARD_RANKS)[number]);
+  const resultJson = { player, house };
+  if (pv > hv) return win(ctx, Number(ctx.cfg.winMultiplier ?? 2.05), resultJson);
+  if (pv < hv) return lose(resultJson, ctx.betType, ctx.amount);
+  return draw(resultJson, ctx.betType, ctx.amount);
 }
 
 // ── 3 EN RAYA — verificación server-side del tablero ────────

@@ -56,6 +56,15 @@ export const GAME_NAMES: Record<string, string> = {
   dado: "Dado",
   tictactoe: "3 en Raya",
   ppt: "Piedra, Papel o Tijera",
+  ruleta: "Ruleta",
+  tragamonedas: "Tragamonedas",
+  rueda: "Rueda de la Fortuna",
+  plinko: "Plinko",
+  cartaalta: "Carta Más Alta",
+  mayormenor: "Mayor o Menor",
+  blackjack: "Blackjack",
+  mines: "Mines",
+  crash: "Crash",
 };
 
 export const GAME_DESCS: Record<string, string> = {
@@ -65,4 +74,13 @@ export const GAME_DESCS: Record<string, string> = {
   dado: "Elige mayor o menor y ajusta tu riesgo con el objetivo.",
   tictactoe: "Retan a la IA en 3 en raya. Si ganas o empatas, hay premio.",
   ppt: "El clásico piedra, papel o tijera contra la casa.",
+  ruleta: "Ruleta europea 0-36: plenos, colores, pares y docenas.",
+  tragamonedas: "Tres rodillos de la suerte: el 7 paga hasta 50x.",
+  rueda: "Gira la rueda: quiebra, premios… y un 5x escondido.",
+  plinko: "Deja caer la bola entre los pinchos y reza por los bordes.",
+  cartaalta: "Tu carta contra la de la casa. La más alta gana.",
+  mayormenor: "Cadena de cartas: ¿la siguiente es mayor o menor? Retírate cuando quieras.",
+  blackjack: "Llega a 21 y vence al crupier. El blackjack paga 2,5x.",
+  mines: "Revela gemas esquivando minas y retírate antes de explotar.",
+  crash: "El multiplicador sube y sube… retírate antes del crash.",
 };
