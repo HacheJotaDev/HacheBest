@@ -14,9 +14,11 @@ import {
   playInstant,
   settleTictactoe,
   ROUND2,
+  tttAiMove,
   validateBet,
   type Cell,
   type GameId,
+  type PlayResult,
 } from "@/lib/games";
 import {
   actSession,
@@ -338,18 +340,58 @@ export async function handleSessionGame(game: SessionGameId, req: NextRequest): 
   }
 }
 
-// ── 3 EN RAYA (start + settle) ───────────────────────────────
+// ── 3 EN RAYA (start + move, TODO en el servidor) ────────────
+
+/** Liquidación final de una partida de 3 en raya */
+function finishTtt(
+  betId: string,
+  userId: string,
+  amount: number,
+  r: PlayResult,
+  board: Cell[],
+): Response {
+  updateBet(betId, (b) => {
+    b.outcome = r.outcome;
+    b.multiplier = r.multiplier;
+    b.payout = r.payout;
+    b.profit = ROUND2(r.payout - amount);
+    b.resultJson = JSON.stringify(r.resultJson);
+  });
+  updateUser(userId, (u) => {
+    if (r.outcome === "win") {
+      u.winsCount += 1;
+      u.totalPayout = ROUND2(u.totalPayout + r.payout);
+    } else if (r.outcome === "lose") {
+      u.lossesCount += 1;
+    } else {
+      u.totalPayout = ROUND2(u.totalPayout + r.payout);
+    }
+    if (r.payout > 0) u.balance = ROUND2(u.balance + r.payout);
+  });
+  const line = (r.resultJson as { line?: number[] | null }).line ?? null;
+  return Response.json({
+    settled: true,
+    outcome: r.outcome,
+    multiplier: r.multiplier,
+    payout: r.payout,
+    profit: ROUND2(r.payout - amount),
+    result: r.resultJson,
+    board,
+    winLine: line,
+    balance: ROUND2(getUser(userId)!.balance),
+  });
+}
 
 export async function handleTictactoe(req: NextRequest): Promise<Response> {
   try {
     const body = (await req.json()) as {
       userId?: string;
-      action?: "start" | "settle";
+      action?: "start" | "move";
       amount?: number;
       betId?: string;
-      board?: Cell[];
+      cell?: number;
     };
-    const { userId, action, amount, betId, board } = body;
+    const { userId, action, amount, betId, cell } = body;
     if (!userId || !action) return bad("Faltan parámetros");
 
     const check = checkUser(userId);
@@ -393,6 +435,7 @@ export async function handleTictactoe(req: NextRequest): Promise<Response> {
         betType: "tictactoe",
         amount: amt,
         outcome: "pending",
+        resultJson: JSON.stringify({ board: Array(9).fill("") as Cell[] }),
       });
 
       return Response.json({
@@ -402,61 +445,49 @@ export async function handleTictactoe(req: NextRequest): Promise<Response> {
       });
     }
 
-    // ── FIN DE PARTIDA ────────────────────────────────
-    if (action === "settle") {
+    // ── MOVIMIENTO (jugador + IA, todo server-side) ───
+    if (action === "move") {
       if (!betId) return bad("Falta betId");
       const bet = getBet(betId);
       if (!bet || bet.userId !== user.id) return bad("Apuesta no encontrada", 404);
       if (bet.outcome !== "pending") return bad("Esta partida ya fue liquidada");
 
-      const settled = settleTictactoe(board ?? [], bet.amount, cfg);
-      if (!settled.ok) {
-        // Tablero inválido: reembolso (void)
-        updateBet(bet.id, (b) => {
-          b.outcome = "void";
-          b.payout = b.amount;
-          b.profit = 0;
-          b.multiplier = 1;
-          b.resultJson = JSON.stringify({ error: settled.reason });
-        });
-        updateUser(user.id, (u) => {
-          u.balance = ROUND2(u.balance + bet.amount);
-          u.totalWagered = ROUND2(u.totalWagered - bet.amount);
-          u.betsCount -= 1;
-        });
-        return Response.json({
-          outcome: "void",
-          balance: ROUND2(getUser(user.id)!.balance),
-          reason: settled.reason,
-        });
+      let saved: { board?: Cell[] } = {};
+      try {
+        saved = JSON.parse(bet.resultJson || "{}") as { board?: Cell[] };
+      } catch {
+        saved = {};
       }
+      const board: Cell[] =
+        Array.isArray(saved.board) && saved.board.length === 9
+          ? saved.board.map((c) => (c === "X" || c === "O" ? c : ""))
+          : (Array(9).fill("") as Cell[]);
 
-      const r = settled.result;
+      if (!Number.isInteger(cell) || (cell ?? -1) < 0 || (cell ?? -1) > 8) {
+        return bad("Casilla inválida");
+      }
+      const idx = cell as number;
+      if (board[idx] !== "") return bad("Esa casilla ya está ocupada");
+
+      // Mueve el jugador (X)
+      board[idx] = "X";
+      const afterX = settleTictactoe(board, bet.amount, cfg);
+      if (afterX.ok) return finishTtt(bet.id, user.id, bet.amount, afterX.result, board);
+
+      // Turno de la casa (O) — IA server-side con protección de la banca
+      const ai = tttAiMove(board);
+      if (ai >= 0) board[ai] = "O";
+      const afterO = settleTictactoe(board, bet.amount, cfg);
+      if (afterO.ok) return finishTtt(bet.id, user.id, bet.amount, afterO.result, board);
+
+      // La partida continúa
       updateBet(bet.id, (b) => {
-        b.outcome = r.outcome;
-        b.multiplier = r.multiplier;
-        b.payout = r.payout;
-        b.profit = ROUND2(r.payout - bet.amount);
-        b.resultJson = JSON.stringify(r.resultJson);
+        b.resultJson = JSON.stringify({ board });
       });
-      updateUser(user.id, (u) => {
-        if (r.outcome === "win") {
-          u.winsCount += 1;
-          u.totalPayout = ROUND2(u.totalPayout + r.payout);
-        } else if (r.outcome === "lose") {
-          u.lossesCount += 1;
-        } else {
-          u.totalPayout = ROUND2(u.totalPayout + r.payout);
-        }
-        if (r.payout > 0) u.balance = ROUND2(u.balance + r.payout);
-      });
-
       return Response.json({
-        outcome: r.outcome,
-        multiplier: r.multiplier,
-        payout: r.payout,
-        profit: ROUND2(r.payout - bet.amount),
-        result: r.resultJson,
+        settled: false,
+        board,
+        aiMove: ai >= 0 ? ai : null,
         balance: ROUND2(getUser(user.id)!.balance),
       });
     }

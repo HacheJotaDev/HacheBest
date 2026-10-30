@@ -12,6 +12,7 @@ import {
   RotateCcw,
   Save,
   Settings2,
+  Shield,
   Users,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -19,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -47,6 +49,13 @@ interface AdminStats {
   totalPayout: number;
   houseProfit: number;
   avgBet: number;
+}
+
+interface HouseInfo {
+  settings: { userWinPercent: number; protection: boolean };
+  houseProfit: number;
+  deficit: number;
+  effectiveWinRate: number;
 }
 
 interface BigWin {
@@ -201,18 +210,20 @@ export function AdminPanel({ active = true }: { active?: boolean }) {
 
 function StatsTab({ adminKey, active }: { adminKey: string; active: boolean }) {
   const [stats, setStats] = useState<AdminStats | null>(null);
+  const [house, setHouse] = useState<HouseInfo | null>(null);
   const [bigWins, setBigWins] = useState<BigWin[]>([]);
   const [recent, setRecent] = useState<AdminBet[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     const [resStats, resBets] = await Promise.all([
-      api<{ stats: AdminStats; bigWins: BigWin[] }>("/api/admin/stats", { adminKey }),
+      api<{ stats: AdminStats; bigWins: BigWin[]; house: HouseInfo }>("/api/admin/stats", { adminKey }),
       api<{ bets: AdminBet[] }>("/api/admin/bets?limit=15", { adminKey }),
     ]);
     if (resStats.ok) {
       setStats(resStats.data.stats);
       setBigWins(resStats.data.bigWins);
+      setHouse(resStats.data.house);
     } else {
       toast.error(resStats.error);
     }
@@ -244,6 +255,29 @@ function StatsTab({ adminKey, active }: { adminKey: string; active: boolean }) {
 
   return (
     <div className="space-y-4">
+      {house && (
+        <div className="casino-card flex flex-wrap items-center justify-between gap-3 p-4">
+          <div className="flex items-center gap-3">
+            <Shield
+              className={`size-8 shrink-0 ${house.settings.protection ? "text-win" : "text-lose"}`}
+              aria-hidden
+            />
+            <div>
+              <p className="text-sm font-bold">
+                Protección de la casa: {house.settings.protection ? "ACTIVA" : "DESACTIVADA"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Base {house.settings.userWinPercent}% · prob. efectiva del usuario {house.effectiveWinRate}% ·
+                déficit de la banca {fmtUSD(house.deficit)}
+              </p>
+            </div>
+          </div>
+          <Badge variant="outline" className="border-gold/40 text-gold">
+            Mecánica 50/50
+          </Badge>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         {cards.map((c) => (
           <div key={c.label} className="casino-card p-4">
@@ -635,6 +669,122 @@ function GamesTab({ adminKey, active }: { adminKey: string; active: boolean }) {
 // ── AJUSTES ──────────────────────────────────────────────────
 
 function SettingsTab({ adminKey }: { adminKey: string }) {
+  return (
+    <div className="space-y-4">
+      <HouseForm adminKey={adminKey} />
+      <PasswordForm adminKey={adminKey} />
+    </div>
+  );
+}
+
+// ── LA CASA (50/50 + protección) ─────────────────────────────
+
+function HouseForm({ adminKey }: { adminKey: string }) {
+  const [info, setInfo] = useState<HouseInfo | null>(null);
+  const [win, setWin] = useState(50);
+  const [prot, setProt] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      const res = await api<HouseInfo>("/api/admin/house", { adminKey });
+      if (res.ok) {
+        setInfo(res.data);
+        setWin(res.data.settings.userWinPercent);
+        setProt(res.data.settings.protection);
+      }
+    })();
+  }, [adminKey]);
+
+  const save = async () => {
+    setBusy(true);
+    const res = await api<HouseInfo & { ok: boolean }>("/api/admin/house", {
+      method: "PUT",
+      body: { userWinPercent: win, protection: prot },
+      adminKey,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    setInfo(res.data);
+    setWin(res.data.settings.userWinPercent);
+    setProt(res.data.settings.protection);
+    toast.success("Cerebro de la casa actualizado");
+  };
+
+  return (
+    <div className="casino-card space-y-4 p-4">
+      <div className="flex items-center gap-2">
+        <Shield className="size-5 text-gold" aria-hidden />
+        <p className="font-bold">La Casa — mecánica 50/50 + protección</p>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 text-center">
+        <div className="rounded-lg border border-border/60 bg-background/50 p-2">
+          <p className="text-xs text-muted-foreground">Beneficio casa</p>
+          <p className={`font-extrabold tabular ${(info?.houseProfit ?? 0) >= 0 ? "text-win" : "text-lose"}`}>
+            {fmtUSD(info?.houseProfit ?? 0)}
+          </p>
+        </div>
+        <div className="rounded-lg border border-border/60 bg-background/50 p-2">
+          <p className="text-xs text-muted-foreground">Déficit</p>
+          <p className="font-extrabold tabular text-lose">{fmtUSD(info?.deficit ?? 0)}</p>
+        </div>
+        <div className="rounded-lg border border-border/60 bg-background/50 p-2">
+          <p className="text-xs text-muted-foreground">Prob. efectiva usuario</p>
+          <p className="font-extrabold tabular text-gold">{info?.effectiveWinRate ?? win}%</p>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <Label>Probabilidad de victoria del usuario (juegos parejos)</Label>
+          <span className="text-sm font-extrabold tabular text-gold">{win}%</span>
+        </div>
+        <Slider
+          value={[win]}
+          min={30}
+          max={70}
+          step={1}
+          onValueChange={(v) => setWin(v[0] ?? 50)}
+          aria-label="Probabilidad de victoria del usuario"
+        />
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>30% (más difícil para el usuario)</span>
+          <span>70% (más fácil)</span>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/50 p-3">
+        <div>
+          <p className="text-sm font-bold">Protección de la banca</p>
+          <p className="text-xs text-muted-foreground">
+            Si la casa acumula pérdidas, baja la probabilidad del usuario (hasta 38%), sube la
+            ventaja en dado/mayor-menor/mines/crash (+12 pts máx.) y la IA del 3 en raya juega
+            casi perfecta.
+          </p>
+        </div>
+        <Switch checked={prot} onCheckedChange={setProt} aria-label="Protección de la banca" />
+      </div>
+
+      <div className="flex justify-end">
+        <Button onClick={() => void save()} disabled={busy} className="gap-1.5">
+          {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Save className="size-4" aria-hidden />}
+          Guardar ajustes
+        </Button>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Juegos parejos con 50/50 decidido por la casa: Par o Impar, Cara o Cruz, Piedra-Papel-Tijera
+        y Carta Más Alta. La ruleta, el número exacto y la tragamonedas mantienen su ventaja natural.
+      </p>
+    </div>
+  );
+}
+
+function PasswordForm({ adminKey }: { adminKey: string }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [busy, setBusy] = useState(false);
@@ -660,6 +810,10 @@ function SettingsTab({ adminKey }: { adminKey: string }) {
 
   return (
     <form onSubmit={submit} className="casino-card mx-auto max-w-sm space-y-4 p-4">
+      <div className="flex items-center gap-2">
+        <KeyRound className="size-5 text-primary" aria-hidden />
+        <p className="font-bold">Contraseña del panel</p>
+      </div>
       <div className="space-y-2">
         <Label htmlFor="cur-pass">Contraseña actual</Label>
         <Input id="cur-pass" type="password" value={current} onChange={(e) => setCurrent(e.target.value)} />

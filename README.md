@@ -10,21 +10,21 @@ Casino de apuestas online en **modo demo**: cada jugador empieza con **1.000 USD
 
 | Juego | Tipo | Detalle |
 |---|---|---|
-| Par o Impar | Instantáneo | Número 0-99, apuesta a par/impar (1,95x) |
+| Par o Impar | Instantáneo | Número 0-99, apuesta a par/impar · **50/50 casa-usuario** (1,95x) |
 | Número Exacto | Instantáneo | Elige 0-36, acertar paga 36x |
-| Cara o Cruz | Instantáneo | 50/50, paga 1,95x |
+| Cara o Cruz | Instantáneo | **50/50 casa-usuario**, paga 1,95x |
 | Dado | Instantáneo | Rueda 0,00-99,99, mayor/menor con objetivo ajustable |
-| Piedra, Papel o Tijera | Instantáneo | Contra la casa, empate devuelve |
+| Piedra, Papel o Tijera | Instantáneo | Contra la casa, 50/50 sin empates (1,9x) |
 | Ruleta | Instantáneo | Europea 0-36: plenos, colores, pares, docenas |
-| Tragamonedas | Instantáneo | 3 rodillos, el 7 paga 50x |
+| Tragamonedas | Instantáneo | 3 rodillos, el 7 paga 50x, dos cerezas ×2 (RTP ≈ 91%) |
 | Rueda de la Fortuna | Instantáneo | 26 segmentos, hasta 5x |
-| Plinko | Instantáneo | 12 filas, riesgo bajo/medio/alto |
-| Carta Más Alta | Instantáneo | Tu carta contra la casa |
+| Plinko | Instantáneo | 12 filas, riesgo bajo/medio/alto (hasta ×140) |
+| Carta Más Alta | Instantáneo | Tu carta contra la casa, 50/50 sin empates (1,95x) |
 | Mayor o Menor | Multi-fase | Cadena de cartas, retírate cuando quieras |
 | Blackjack | Multi-fase | Pedir, plantarse y doblar. BJ paga 2,5x |
 | Mines | Multi-fase | 1-24 minas, retírate antes de explotar |
 | Crash | Multi-fase | Multiplicador en tiempo real, retírate antes del crash |
-| 3 en Raya | Partida vs IA | Ganas 2,5x, empate devuelve |
+| 3 en Raya | Partida vs IA (server) | Ganas 2,5x, empate devuelve · la IA juega en el servidor |
 
 ---
 
@@ -48,7 +48,7 @@ Casino de apuestas online en **modo demo**: cada jugador empieza con **1.000 USD
 | `POST /api/games/blackjack` | `{ userId, action: "start"\|"act", ... }` (act: hit/stand/double) |
 | `POST /api/games/mines` | `{ userId, action: "start"\|"act", ... }` (act: reveal/cashout) |
 | `POST /api/games/crash` | `{ userId, action: "start"\|"act", ... }` (act: tick/cashout) |
-| `POST /api/games/tictactoe` | `{ userId, action: "start"\|"settle", ... }` |
+| `POST /api/games/tictactoe` | `{ userId, action: "start"\|"move", ... }` (move: `{ betId, cell }`) |
 
 ### Usuarios y varios
 
@@ -75,14 +75,28 @@ Casino de apuestas online en **modo demo**: cada jugador empieza con **1.000 USD
 | `GET/PUT /api/admin/games` | Config de juegos: activar/desactivar, límites, multiplicadores |
 | `GET/PATCH /api/admin/users` | Banear, reactivar, fijar saldo, resetear |
 | `GET/PUT /api/admin/settings` | Cambiar contraseña del panel |
+| `GET/PUT /api/admin/house` | **El cerebro de la casa**: prob. 50/50 del usuario y protección de la banca |
 
 > Las rutas admin requieren la cabecera `x-admin-key` con la contraseña.
 
 ---
 
-## 🔐 Panel admin
+## 🏦 La Casa — mecánica 50/50 + protección de la banca
 
-- **URL:** `/admin` (enlace "Admin" en el pie de página del casino)
+La casa **no juega a la suerte**: decide el resultado **antes** del sorteo.
+
+- **Juegos parejos** (Par o Impar, Cara o Cruz, PPT, Carta Más Alta): el usuario gana con una probabilidad base del **50 %** (50 % para la casa, 50 % para el usuario) y los pagos quedan por debajo del valor justo (1,9x–1,95x), así la casa siempre mantiene una ventaja del 2,5–5 %.
+- **Protección de la banca** (activada por defecto): si la casa acumula pérdidas, automáticamente endurece los juegos:
+  - baja la probabilidad del usuario hasta un mínimo de **38 %**,
+  - sube la ventaja en Dado, Mayor/Menor, Mines y Crash (hasta **+12 puntos**),
+  - la IA del 3 en Raya pasa a jugar casi perfecta.
+- En el panel admin (pestaña *Ajustes → La Casa*) puedes ajustar la probabilidad base (30–70 %) y activar/desactivar la protección.
+
+---
+
+## 🔐 Panel admin (oculto)
+
+- **URL:** `dominio.com/admin` — **no aparece en ningún sitio del casino**: sin enlaces, sin bots (`robots.ts` lo bloquea). Solo se entra escribiendo la URL.
 - **Contraseña por defecto:** `admin123`
 - Se puede cambiar desde el propio panel (pestaña *Ajustes*) o con la variable de entorno `ADMIN_PASSWORD`
 - Funciones: estadísticas del casino, feed de apuestas en vivo, gestión de usuarios (banear, saldo, reset), configuración por juego (on/off, apuesta mín/máx, multiplicadores), cambio de contraseña

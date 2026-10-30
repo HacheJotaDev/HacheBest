@@ -119,8 +119,31 @@ function loadData(): DBData {
     // Archivo inexistente o corrupto → base nueva
   }
   seedGameConfigs(data);
+  migrateHouse(data);
   globalForDB.__hachebestDB = data;
   return data;
+}
+
+/**
+ * Migración v2 — mecánica 50/50 + protección de la casa:
+ *  · ajustes por defecto: houseUserWinPercent=50, houseProtection=true
+ *  · PPT pasa a decidir-primero (sin empates) y paga 1.9x
+ *  · Carta más alta 1.95x · Par/Impar y Moneda 1.95x
+ */
+function migrateHouse(data: DBData) {
+  if (data.settings["houseV2"] === "2") return;
+  data.settings["houseV2"] = "2";
+  if (data.settings["houseUserWinPercent"] === undefined) data.settings["houseUserWinPercent"] = "50";
+  if (data.settings["houseProtection"] === undefined) data.settings["houseProtection"] = "true";
+  const setCfg = (game: string, cfg: object) => {
+    const c = data.gameConfigs.find((x) => x.game === game);
+    if (c) c.configJson = JSON.stringify(cfg);
+  };
+  setCfg("ppt", { winMultiplier: 1.9 });
+  setCfg("cartaalta", { winMultiplier: 1.95 });
+  setCfg("parimpar", { multiplier: 1.95 });
+  setCfg("moneda", { multiplier: 1.95 });
+  scheduleSave();
 }
 
 /** Escritura atómica: escribe a .tmp y renombra */

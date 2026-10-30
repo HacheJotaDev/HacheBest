@@ -54,6 +54,18 @@ export interface PlayResponse {
   reason?: string;
 }
 
+export interface TttMoveData {
+  settled: boolean;
+  balance: number;
+  board: string[];
+  aiMove?: number | null;
+  outcome?: string;
+  multiplier?: number;
+  payout?: number;
+  profit?: number;
+  winLine?: number[] | null;
+}
+
 export type SessionPublicState = Record<string, unknown>;
 
 export interface SessionStartData {
@@ -125,7 +137,10 @@ interface CasinoState {
   ) => Promise<{ ok: true; data: PlayResponse } | { ok: false; error: string }>;
 
   tttStart: (amount: number) => Promise<{ ok: true; data: { betId: string; balance: number } } | { ok: false; error: string }>;
-  tttSettle: (betId: string, board: string[]) => Promise<{ ok: true; data: PlayResponse } | { ok: false; error: string }>;
+  tttMove: (
+    betId: string,
+    cell: number,
+  ) => Promise<{ ok: true; data: TttMoveData } | { ok: false; error: string }>;
 
   sessionStart: (
     game: string,
@@ -240,15 +255,15 @@ export const useCasino = create<CasinoState>((set, get) => ({
     return { ok: true, data: { betId: res.data.betId, balance: res.data.balance } };
   },
 
-  tttSettle: async (betId, board) => {
+  tttMove: async (betId, cell) => {
     const u = get().user;
     if (!u) return { ok: false, error: "Sin sesión" };
-    const res = await api<PlayResponse>("/api/games/tictactoe", {
-      body: { userId: u.id, action: "settle", betId, board },
+    const res = await api<TttMoveData>("/api/games/tictactoe", {
+      body: { userId: u.id, action: "move", betId, cell },
     });
     if (!res.ok) return { ok: false, error: res.error };
     get().setBalance(res.data.balance);
-    void get().refreshBets();
+    if (res.data.settled) void get().refreshBets();
     return { ok: true, data: res.data };
   },
 

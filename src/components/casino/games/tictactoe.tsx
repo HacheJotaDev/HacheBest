@@ -13,57 +13,11 @@ import { toast } from "sonner";
 type Cell = "X" | "O" | "";
 type Phase = "idle" | "playing" | "finished";
 
-const LINES = [
-  [0, 1, 2], [3, 4, 5], [6, 7, 8],
-  [0, 3, 6], [1, 4, 7], [2, 5, 8],
-  [0, 4, 8], [2, 4, 6],
-];
-
-function winnerOf(b: Cell[]): { winner: "X" | "O" | null; line: number[] | null } {
-  for (const line of LINES) {
-    const [a, c, d] = line;
-    if (b[a] && b[a] === b[c] && b[a] === b[d]) return { winner: b[a] as "X" | "O", line };
-  }
-  return { winner: null, line: null };
-}
-
-function findWinningMove(b: Cell[], who: "X" | "O"): number | null {
-  for (let i = 0; i < 9; i++) {
-    if (b[i] !== "") continue;
-    b[i] = who;
-    const w = winnerOf(b).winner;
-    b[i] = "";
-    if (w === who) return i;
-  }
-  return null;
-}
-
-/** IA "humana": gana y bloquea casi siempre, pero es batible */
-function aiChoose(board: Cell[]): number {
-  const b = [...board];
-  const empty = b.map((c, i) => (c === "" ? i : -1)).filter((i) => i >= 0);
-  if (empty.length === 0) return -1;
-
-  const winMove = findWinningMove(b, "O");
-  if (winMove !== null && Math.random() < 0.9) return winMove;
-
-  const blockMove = findWinningMove(b, "X");
-  if (blockMove !== null && Math.random() < 0.78) return blockMove;
-
-  // Elección aleatoria ponderada: centro > esquinas > bordes
-  const weighted: number[] = [];
-  for (const i of empty) {
-    const w = i === 4 ? 3 : [0, 2, 6, 8].includes(i) ? 2 : 1;
-    for (let k = 0; k < w; k++) weighted.push(i);
-  }
-  return weighted[Math.floor(Math.random() * weighted.length)];
-}
-
-/** 3 EN RAYA contra la IA — ganar paga ×2,5 · empate devuelve la apuesta */
+/** 3 EN RAYA contra la IA de la casa (todo server-side) — ganar paga ×2,5 · empate devuelve */
 export function TictactoeGame() {
   const user = useCasino((s) => s.user);
   const tttStart = useCasino((s) => s.tttStart);
-  const tttSettle = useCasino((s) => s.tttSettle);
+  const tttMove = useCasino((s) => s.tttMove);
   const cfg = useCasino((s) => s.gamesConfig.find((g) => g.game === "tictactoe"));
   const min = cfg?.minBet ?? 1;
   const max = cfg?.maxBet ?? 500;
@@ -78,10 +32,8 @@ export function TictactoeGame() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [amount, setAmount] = useState(10);
   const [board, setBoard] = useState<Cell[]>(Array(9).fill(""));
-  const [turn, setTurn] = useState<"X" | "O">("X");
   const [winLine, setWinLine] = useState<number[] | null>(null);
   const [busy, setBusy] = useState(false);
-  const [aiThinking, setAiThinking] = useState(false);
   const [last, setLast] = useState<{ outcome: string; profit: number } | null>(null);
   const [betId, setBetId] = useState<string | null>(null);
 
@@ -90,60 +42,39 @@ export function TictactoeGame() {
   async function startMatch() {
     setBusy(true);
     const res = await tttStart(amount);
+    setBusy(false);
     if (!res.ok) {
-      setBusy(false);
       toast.error(res.error);
       return;
     }
     setBetId(res.data.betId);
     setBoard(Array(9).fill(""));
-    setTurn("X");
     setWinLine(null);
     setLast(null);
     setPhase("playing");
-    setBusy(false);
     toast.info(`Partida iniciada: ${fmtUSD(amount)} en juego. ¡Tú mueves primero (X)!`);
   }
 
-  async function settle(finalBoard: Cell[]) {
-    if (!betId) return;
-    const res = await tttSettle(betId, finalBoard);
+  async function handleCell(i: number) {
+    if (phase !== "playing" || busy || !betId || board[i] !== "") return;
+    setBusy(true);
+    // X optimista mientras responde el servidor
+    setBoard(board.map((c, idx) => (idx === i ? "X" : c)));
+
+    const res = await tttMove(betId, i);
     if (!res.ok) {
+      setBusy(false);
       toast.error(res.error);
       return;
     }
-    setLast({ outcome: res.data.outcome, profit: res.data.profit });
-    toastResult(res.data.outcome, res.data.profit);
-  }
-
-  function endIfOver(b: Cell[]) {
-    const { winner, line } = winnerOf(b);
-    const full = b.every((c) => c !== "");
-    if (winner || full) {
-      setWinLine(line);
+    setBoard(res.data.board as Cell[]);
+    setBusy(false);
+    if (res.data.settled) {
+      setWinLine(res.data.winLine ?? null);
+      setLast({ outcome: res.data.outcome ?? "draw", profit: res.data.profit ?? 0 });
       setPhase("finished");
-      void settle(b);
-      return true;
+      toastResult(res.data.outcome ?? "draw", res.data.profit ?? 0);
     }
-    return false;
-  }
-
-  async function handleCell(i: number) {
-    if (phase !== "playing" || busy || aiThinking || board[i] !== "") return;
-    const afterPlayer: Cell[] = board.map((c, idx) => (idx === i ? "X" : c));
-    setBoard(afterPlayer);
-    if (endIfOver(afterPlayer)) return;
-
-    // Turno de la IA
-    setAiThinking(true);
-    await new Promise((r) => setTimeout(r, 500 + Math.random() * 400));
-    const move = aiChoose(afterPlayer);
-    const afterAi: Cell[] =
-      move >= 0 ? afterPlayer.map((c, idx) => (idx === move ? "O" : c)) : afterPlayer;
-    setAiThinking(false);
-    setBoard(afterAi);
-    setTurn("X");
-    endIfOver(afterAi);
   }
 
   const won = last?.outcome === "win";
@@ -155,10 +86,10 @@ export function TictactoeGame() {
     if (phase === "finished") {
       if (won) return `¡Ganaste ${fmtUSD(last?.profit ?? 0)}!`;
       if (draw) return "Empate: tu apuesta ha sido devuelta.";
-      if (lost) return "La IA ganó esta partida. ¡Revancha!";
+      if (lost) return "La casa ganó esta partida. ¡Revancha!";
       return "";
     }
-    if (aiThinking) return "La IA está pensando…";
+    if (busy) return "La IA está pensando…";
     return "Tu turno: coloca una X.";
   })();
 
@@ -178,7 +109,7 @@ export function TictactoeGame() {
                 type="button"
                 whileHover={cell === "" && phase === "playing" ? { scale: 1.04 } : {}}
                 whileTap={cell === "" && phase === "playing" ? { scale: 0.96 } : {}}
-                disabled={phase !== "playing" || cell !== "" || disabled || aiThinking}
+                disabled={phase !== "playing" || cell !== "" || disabled}
                 onClick={() => void handleCell(i)}
                 className={`
                   grid aspect-square place-items-center rounded-xl border-2 text-4xl sm:text-5xl font-black transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring
@@ -186,7 +117,7 @@ export function TictactoeGame() {
                   ${cell === "O" ? "border-red-500/50 bg-red-500/10 text-red-400" : ""}
                   ${cell === "" ? "border-border/60 bg-background/50" : ""}
                   ${winLine?.includes(i) ? "ring-2 ring-gold border-gold/70" : ""}
-                  ${cell === "" && phase === "playing" && !aiThinking ? "hover:border-gold/50 cursor-pointer" : "cursor-default"}
+                  ${cell === "" && phase === "playing" && !busy ? "hover:border-gold/50 cursor-pointer" : "cursor-default"}
                 `}
                 aria-label={`Casilla ${i + 1}${cell ? `: ${cell}` : ", vacía"}`}
               >
@@ -201,7 +132,7 @@ export function TictactoeGame() {
               <User className="size-3.5" aria-hidden /> Tú (✕)
             </span>
             <span className="flex items-center gap-1.5 font-bold text-red-400">
-              <Bot className="size-3.5" aria-hidden /> IA (◯)
+              <Bot className="size-3.5" aria-hidden /> La casa (◯)
             </span>
           </div>
         </div>
@@ -213,7 +144,7 @@ export function TictactoeGame() {
           }`}
           aria-live="polite"
         >
-          {aiThinking && <Loader2 className="size-4 animate-spin" aria-hidden />}
+          {busy && phase === "playing" && <Loader2 className="size-4 animate-spin" aria-hidden />}
           {status}
         </div>
       </div>
@@ -246,6 +177,7 @@ export function TictactoeGame() {
                 Victoria: <strong className="text-gold">×{winMultiplier.toFixed(2)}</strong> tu apuesta.
               </p>
               <p>Empate: se devuelve tu importe. Derrota: pierdes la apuesta.</p>
+              <p className="pt-1 text-[11px]">La IA juega en el servidor: nada de trampas 😏</p>
             </div>
           </div>
         )}
@@ -278,6 +210,7 @@ export function TictactoeGame() {
                 setBoard(Array(9).fill(""));
                 setLast(null);
                 setWinLine(null);
+                setBetId(null);
               }}
             >
               <RotateCcw className="size-5" aria-hidden /> Nueva partida

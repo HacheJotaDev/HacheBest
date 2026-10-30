@@ -1,8 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { Dices, ExternalLink, ShieldCheck, ShieldAlert } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Dices, ShieldCheck, ShieldAlert } from "lucide-react";
 
 export function Footer() {
   return (
@@ -23,13 +21,6 @@ export function Footer() {
           <span className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs font-bold text-primary">
             <ShieldCheck className="size-3" aria-hidden /> Juego responsable
           </span>
-          <Button asChild variant="ghost" size="sm" className="text-muted-foreground gap-1.5">
-            <a href="/admin" title="Panel de administración">
-              <ShieldCheck className="size-4" aria-hidden />
-              Admin
-              <ExternalLink className="size-3 opacity-60" aria-hidden />
-            </a>
-          </Button>
         </div>
       </div>
     </footer>

@@ -13,17 +13,17 @@ import { toast } from "sonner";
 // debe coincidir con src/lib/games.ts
 const PLINKO_ROWS = 12;
 const PLINKO_TABLES: Record<"bajo" | "medio" | "alto", number[]> = {
-  bajo: [10, 3, 1.6, 1.4, 1.1, 1, 0.5, 1, 1.1, 1.4, 1.6, 3, 10],
-  medio: [33, 11, 4, 2, 1.1, 0.6, 0.3, 0.6, 1.1, 2, 4, 11, 33],
-  alto: [170, 24, 8.1, 2, 0.7, 0.2, 0.2, 0.2, 0.7, 2, 8.1, 24, 170],
+  bajo: [9, 3, 1.6, 1.3, 1.05, 0.9, 0.55, 0.9, 1.05, 1.3, 1.6, 3, 9],
+  medio: [25, 8, 3, 1.6, 1, 0.7, 0.4, 0.7, 1, 1.6, 3, 8, 25],
+  alto: [140, 22, 7.2, 1.8, 0.6, 0.25, 0.2, 0.25, 0.6, 1.8, 7.2, 22, 140],
 };
 
 type Risk = "bajo" | "medio" | "alto";
 
 const RISKS: { id: Risk; label: string; max: string }[] = [
-  { id: "bajo", label: "Bajo", max: "×10" },
-  { id: "medio", label: "Medio", max: "×33" },
-  { id: "alto", label: "Alto", max: "×170" },
+  { id: "bajo", label: "Bajo", max: "×9" },
+  { id: "medio", label: "Medio", max: "×25" },
+  { id: "alto", label: "Alto", max: "×140" },
 ];
 
 const fmtMult = (m: number) => `×${String(m).replace(".", ",")}`;

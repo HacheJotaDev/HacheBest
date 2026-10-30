@@ -2,6 +2,12 @@ import { NextRequest } from "next/server";
 import { checkAdmin, unauthorized } from "@/lib/admin";
 import { aggregateBets, listUsers, topWins } from "@/lib/db";
 import { ROUND2 } from "@/lib/games";
+import {
+  effectiveUserWinRate,
+  getHouseSettings,
+  houseDeficit,
+  houseProfit,
+} from "@/lib/house";
 
 /** GET /api/admin/stats — resumen del casino */
 export async function GET(req: NextRequest) {
@@ -10,6 +16,7 @@ export async function GET(req: NextRequest) {
     const agg = aggregateBets();
     const users = listUsers(500);
     const activeUsers = users.filter((u) => !u.isBanned);
+    const houseSettings = getHouseSettings();
 
     return Response.json({
       stats: {
@@ -21,6 +28,12 @@ export async function GET(req: NextRequest) {
         totalPayout: ROUND2(agg.sumPayout),
         houseProfit: ROUND2(agg.sumProfit * -1), // la casa gana lo que los jugadores pierden
         avgBet: ROUND2(agg.avgAmount),
+      },
+      house: {
+        settings: houseSettings,
+        profit: ROUND2(houseProfit()),
+        deficit: ROUND2(houseDeficit()),
+        effectiveWinRate: Math.round(effectiveUserWinRate() * 1000) / 10,
       },
       bigWins: topWins(10).map((b) => ({
         id: b.id,

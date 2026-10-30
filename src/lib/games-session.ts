@@ -1,5 +1,6 @@
 import { randomInt } from "crypto";
 import { ROUND2, cryptoFloat } from "./games";
+import { effectiveEdge } from "./house";
 
 // ─────────────────────────────────────────────────────────────
 // HacheBest — Juegos de sesión (multi-fase, server-side)
@@ -96,15 +97,18 @@ export function blackjackTotal(cards: string[]): { total: number; soft: boolean 
 
 // ── Mines ────────────────────────────────────────────────────
 
-/** Multiplicador de mines: 0.99 × Π (25-i)/(25-M-i) para i en [0, picks) */
+/**
+ * Multiplicador de mines: 0.99 × Π (25-i)/(25-M-i) para i en [0, picks)
+ * La ventaja base (1 %) sube dinámicamente si la casa está en déficit.
+ */
 export function minesMultiplier(mines: number, picks: number, cfg?: Cfg): number {
   if (picks <= 0) return 1;
   let m = 1;
   for (let i = 0; i < picks; i++) {
     m *= (25 - i) / (25 - mines - i);
   }
-  const edge = Number(cfg?.edge ?? 1) / 100;
-  return ROUND2(m * (1 - edge));
+  const edge = effectiveEdge(Number(cfg?.edge ?? 1));
+  return ROUND2(m * (1 - edge / 100));
 }
 
 function sampleMines(count: number): number[] {
@@ -121,13 +125,13 @@ function sampleMines(count: number): number[] {
 // ── Crash ────────────────────────────────────────────────────
 
 /**
- * Punto de crash con 1 % de ventaja de la casa:
- * crash = floor(99/(1-U))/100, mínimo 1.00, tope 5000.
- * P(crash instantáneo) ≈ 1 %.
+ * Punto de crash: crash = floor((100-edge)/(1-U))/100, mínimo 1.00, tope 5000.
+ * Ventaja base 1 % (sube dinámicamente si la casa está en déficit).
+ * Con edge 1 % → P(crash instantáneo) ≈ 1 %.
  */
-export function sampleCrashPoint(): number {
+export function sampleCrashPoint(houseEdgePct: number = 1): number {
   const u = cryptoFloat(1);
-  const raw = Math.floor(99 / (1 - u || 1e-9)) / 100;
+  const raw = Math.floor((100 - houseEdgePct) / (1 - u || 1e-9)) / 100;
   return Math.min(5000, Math.max(1, raw));
 }
 
@@ -172,7 +176,7 @@ export interface CrashState {
 function hiLoStep(current: string, guess: "mayorigual" | "menorigual", cfg: Cfg): number {
   const r = hiLoRank(current);
   const p = guess === "mayorigual" ? (14 - r) / 13 : r / 13;
-  const edge = Number(cfg.houseEdge ?? 1);
+  const edge = effectiveEdge(Number(cfg.houseEdge ?? 1));
   return ROUND2((100 - edge) / (p * 100));
 }
 
@@ -301,7 +305,10 @@ export function startSession(
     }
     case "crash": {
       const now = Date.now();
-      const state: CrashState = { crashPoint: sampleCrashPoint(), startedAt: now };
+      const state: CrashState = {
+        crashPoint: sampleCrashPoint(effectiveEdge(Number(cfg.houseEdge ?? 1))),
+        startedAt: now,
+      };
       return { state, publicState: publicCrash(state, cfg, now), serverNow: now };
     }
   }

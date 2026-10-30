@@ -67,7 +67,7 @@ function fmtMult(n: number): string {
   return n.toLocaleString("es-ES", { maximumFractionDigits: 2 });
 }
 
-/** TRAGAMONEDAS — tres rodillos: el trío paga hasta ×50 · dos cerezas ×2,5 · cualquier otro par ×0,5 */
+/** TRAGAMONEDAS — tres rodillos: el trío paga hasta ×50 · dos cerezas ×2 · cualquier otro par ×0,5 */
 export function TragamonedasGame() {
   const play = useCasino((s) => s.play);
   const user = useCasino((s) => s.user);
@@ -262,7 +262,7 @@ export function TragamonedasGame() {
             })}
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            2 cerezas pagan <strong className="text-gold">×2,5</strong> · cualquier otro par paga{" "}
+            2 cerezas pagan <strong className="text-gold">×2</strong> · cualquier otro par paga{" "}
             <strong className="text-gold">×0,5</strong>.
           </p>
         </div>
@@ -321,7 +321,7 @@ export function TragamonedasGame() {
           </Button>
           <p className="text-xs text-muted-foreground">
             Tres símbolos iguales pagan según la tabla. Dos cerezas{" "}
-            <strong className="text-gold">×2,5</strong> y cualquier otro par{" "}
+            <strong className="text-gold">×2</strong> y cualquier otro par{" "}
             <strong className="text-gold">×0,5</strong>.
           </p>
         </div>
