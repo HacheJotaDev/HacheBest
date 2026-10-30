@@ -25,8 +25,8 @@ import {
 // Protección de la casa: si la banca baja del capital puesto
 // (déficit), automáticamente:
 //   · baja la probabilidad de victoria del usuario (hasta 38 %)
-//   · sube la ventaja de los juegos de azar puro (dado, mayor/menor,
-//     mines, crash) hasta +12 puntos
+//   · sube la ventaja de los juegos de azar puro (dado, mayor/menor…)
+//     hasta +12 puntos
 //   · la IA del 3 en raya juega casi perfecta
 //
 // Cobertura de apuestas: la casa nunca acepta una apuesta cuyo peor
@@ -176,7 +176,7 @@ interface CeilingCtx {
 
 /**
  * Peor-case multiplier de una apuesta concreta (para comprobar cobertura).
- * Juegos de "ralentí" (mayormenor, mines, crash): el multiplicador crece
+ * Juegos de "ralentí" (mayormenor): el multiplicador crece
  * durante la ronda, así que se usa un techo de exposición de 10×.
  */
 export function betCeiling(game: string, ctx: CeilingCtx = {}): number {
@@ -206,6 +206,14 @@ export function betCeiling(game: string, ctx: CeilingCtx = {}): number {
       return 50; // triple 7️⃣
     case "rueda":
       return 5; // mejor segmento
+    case "bacara": {
+      const bt = ctx.betType ?? "jugador";
+      if (bt === "empate") return n("empate", 9);
+      if (bt === "banca") return n("banca", 1.95);
+      return n("jugador", 2);
+    }
+    case "rasca":
+      return 20; // premio máximo de la tarjeta
     case "plinko": {
       const risk = ctx.extra?.risk === "alto" ? "alto" : ctx.extra?.risk === "bajo" ? "bajo" : "medio";
       return risk === "alto" ? 100 : risk === "bajo" ? 9 : 25; // extremos de cada tabla
@@ -216,8 +224,6 @@ export function betCeiling(game: string, ctx: CeilingCtx = {}): number {
       // Se cubre también el doble: 2 × pago de blackjack
       return n("blackjackPays", 2.5) * 2;
     case "mayormenor":
-    case "mines":
-    case "crash":
       return 10; // techo de exposición de ronda
     default:
       return 2;
@@ -230,11 +236,13 @@ export function representativeCeiling(game: string): number {
     case "ruleta":
       return 2; // lo típico: apuestas a color/par/etc.
     case "dado":
-      return (100 - 1) / 50; // objetivo medio ≈ 1.98×
+      return (100 - 3) / 50; // objetivo medio ≈ 1.94×
     case "plinko":
       return 25; // riesgo medio
-    case "mines":
-    case "crash":
+    case "bacara":
+      return 2; // apuesta típica a jugador/banca
+    case "rasca":
+      return 20;
     case "mayormenor":
       return 10;
     case "blackjack":

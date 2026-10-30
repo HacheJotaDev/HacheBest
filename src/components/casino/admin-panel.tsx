@@ -946,7 +946,7 @@ function HouseForm({ adminKey }: { adminKey: string }) {
           <p className="text-sm font-bold">Protección de la banca</p>
           <p className="text-xs text-muted-foreground">
             Si la casa acumula pérdidas, baja la probabilidad del usuario (hasta 38%), sube la
-            ventaja en dado/mayor-menor/mines/crash (+12 pts máx.) y la IA del 3 en raya juega
+            ventaja en dado/mayor-menor (+12 pts máx.) y la IA del 3 en raya juega
             casi perfecta.
           </p>
         </div>

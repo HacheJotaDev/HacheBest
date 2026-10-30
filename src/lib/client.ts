@@ -60,11 +60,11 @@ export const GAME_NAMES: Record<string, string> = {
   tragamonedas: "Tragamonedas",
   rueda: "Rueda de la Fortuna",
   plinko: "Plinko",
+  bacara: "Bacará",
+  rasca: "Rasca y Gana",
   cartaalta: "Carta Más Alta",
   mayormenor: "Mayor o Menor",
   blackjack: "Blackjack",
-  mines: "Mines",
-  crash: "Crash",
 };
 
 export const GAME_DESCS: Record<string, string> = {
@@ -78,9 +78,9 @@ export const GAME_DESCS: Record<string, string> = {
   tragamonedas: "Tres rodillos de la suerte: el 7 paga hasta 50x.",
   rueda: "Gira la rueda: quiebra, premios… y un 5x escondido.",
   plinko: "Deja caer la bola entre los pinchos y reza por los bordes.",
+  bacara: "El clásico de cartas: Jugador, Banca o Empate. Pura suerte.",
+  rasca: "Raspa la tarjeta 3×3: tres símbolos iguales y te llevas el premio.",
   cartaalta: "Tu carta contra la de la casa. La más alta gana.",
   mayormenor: "Cadena de cartas: ¿la siguiente es mayor o menor? Retírate cuando quieras.",
   blackjack: "Llega a 21 y vence al crupier. El blackjack paga 2,5x.",
-  mines: "Revela gemas esquivando minas y retírate antes de explotar.",
-  crash: "El multiplicador sube y sube… retírate antes del crash.",
 };

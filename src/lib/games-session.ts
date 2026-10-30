@@ -1,15 +1,15 @@
 import { randomInt } from "crypto";
-import { ROUND2, cryptoFloat } from "./games";
+import { ROUND2 } from "./games";
 import { effectiveEdge } from "./house";
 
 // ─────────────────────────────────────────────────────────────
 // HacheBest — Juegos de sesión (multi-fase, server-side)
-// mayormenor · blackjack · mines · crash
+// mayormenor · blackjack
 // El estado vive cifrado en el resultJson de la apuesta "pending"
 // y NUNCA se envía información secreta al cliente.
 // ─────────────────────────────────────────────────────────────
 
-export const SESSION_GAMES = ["mayormenor", "blackjack", "mines", "crash"] as const;
+export const SESSION_GAMES = ["mayormenor", "blackjack"] as const;
 export type SessionGameId = (typeof SESSION_GAMES)[number];
 
 export function isSessionGame(g: string): g is SessionGameId {
@@ -34,7 +34,7 @@ export interface ActOutcome {
   settlement?: Settlement;
   /** Apuesta adicional que hay que descontar (blackjack: doblar) */
   extraStake?: number;
-  /** Reloj del servidor (crash) */
+  /** Reloj del servidor */
   serverNow?: number;
   /** Acción inválida */
   error?: string;
@@ -95,56 +95,6 @@ export function blackjackTotal(cards: string[]): { total: number; soft: boolean 
   return { total, soft: aces > 0 };
 }
 
-// ── Mines ────────────────────────────────────────────────────
-
-/**
- * Multiplicador de mines: 0.99 × Π (25-i)/(25-M-i) para i en [0, picks)
- * La ventaja base (1 %) sube dinámicamente si la casa está en déficit.
- */
-export function minesMultiplier(mines: number, picks: number, cfg?: Cfg): number {
-  if (picks <= 0) return 1;
-  let m = 1;
-  for (let i = 0; i < picks; i++) {
-    m *= (25 - i) / (25 - mines - i);
-  }
-  const edge = effectiveEdge(Number(cfg?.edge ?? 1));
-  return ROUND2(m * (1 - edge / 100));
-}
-
-function sampleMines(count: number): number[] {
-  const idx = Array.from({ length: 25 }, (_, i) => i);
-  for (let i = idx.length - 1; i > 0; i--) {
-    const j = randomInt(0, i + 1);
-    const tmp = idx[i]!;
-    idx[i] = idx[j]!;
-    idx[j] = tmp;
-  }
-  return idx.slice(0, count).sort((a, b) => a - b);
-}
-
-// ── Crash ────────────────────────────────────────────────────
-
-/**
- * Punto de crash: crash = floor((100-edge)/(1-U))/100, mínimo 1.00, tope 5000.
- * Ventaja base 1 % (sube dinámicamente si la casa está en déficit).
- * Con edge 1 % → P(crash instantáneo) ≈ 1 %.
- */
-export function sampleCrashPoint(houseEdgePct: number = 1): number {
-  const u = cryptoFloat(1);
-  const raw = Math.floor((100 - houseEdgePct) / (1 - u || 1e-9)) / 100;
-  return Math.min(5000, Math.max(1, raw));
-}
-
-/** Multiplicador del crash en función del tiempo: e^(g·t) redondeado hacia abajo */
-export function crashMult(startedAt: number, now: number, growth: number): number {
-  const t = Math.max(0, (now - startedAt) / 1000);
-  return Math.floor(Math.exp(growth * t) * 100) / 100;
-}
-
-export function crashGrowth(cfg: Cfg): number {
-  return Number(cfg.growth ?? 8) / 100; // por defecto +8 %/s
-}
-
 // ── Estados por juego ────────────────────────────────────────
 
 export interface HiLoState {
@@ -159,16 +109,6 @@ export interface BJState {
   player: string[];
   dealer: string[];
   doubled: boolean;
-}
-
-export interface MinesState {
-  mines: number[];
-  revealed: number[];
-}
-
-export interface CrashState {
-  crashPoint: number;
-  startedAt: number;
 }
 
 // ── Estados públicos (lo que ve el cliente) ──────────────────
@@ -204,23 +144,6 @@ export function publicBJ(state: BJState) {
   };
 }
 
-function publicMines(state: MinesState, cfg: Cfg) {
-  const mines = state.mines.length;
-  const picks = state.revealed.length;
-  const maxSafe = 25 - mines;
-  return {
-    minesCount: mines,
-    revealed: state.revealed,
-    currentMult: minesMultiplier(mines, picks, cfg),
-    nextMult: picks < maxSafe ? minesMultiplier(mines, picks + 1, cfg) : null,
-    remainingSafe: maxSafe - picks,
-    gridSize: 25,
-  };
-}
-
-function publicCrash(state: CrashState, cfg: Cfg, now: number) {
-  return { startedAt: state.startedAt, serverNow: now, growth: crashGrowth(cfg) };
-}
 
 // ── Blackjack: naturals y liquidación ────────────────────────
 
@@ -294,22 +217,6 @@ export function startSession(
       const dealer = [drawFrom(deck), drawFrom(deck)];
       const state: BJState = { deck, player, dealer, doubled: false };
       return { state, publicState: publicBJ(state) };
-    }
-    case "mines": {
-      const mines = Number(extra?.mines);
-      if (!Number.isInteger(mines) || mines < 1 || mines > 24) {
-        return { error: "Elige entre 1 y 24 minas" };
-      }
-      const state: MinesState = { mines: sampleMines(mines), revealed: [] };
-      return { state, publicState: publicMines(state, cfg) };
-    }
-    case "crash": {
-      const now = Date.now();
-      const state: CrashState = {
-        crashPoint: sampleCrashPoint(effectiveEdge(Number(cfg.houseEdge ?? 1))),
-        startedAt: now,
-      };
-      return { state, publicState: publicCrash(state, cfg, now), serverNow: now };
     }
   }
 }
@@ -429,105 +336,6 @@ export function actSession(
           };
         }
         return { extraStake: ctx.amount, settlement: blackjackSettle(s, ROUND2(ctx.amount * 2), ctx.cfg) };
-      }
-
-      return { error: "Acción desconocida" };
-    }
-
-    // ── MINES ──────────────────────────────────────────────────
-    case "mines": {
-      const s = ctx.state as MinesState;
-      const mines = s.mines.length;
-      const maxSafe = 25 - mines;
-
-      if (ctx.act === "reveal") {
-        const tile = Number(ctx.extra?.tile);
-        if (!Number.isInteger(tile) || tile < 0 || tile > 24) {
-          return { error: "Casilla inválida" };
-        }
-        if (s.revealed.includes(tile)) return { error: "Casilla ya revelada" };
-        if (s.mines.includes(tile)) {
-          return {
-            settlement: {
-              outcome: "lose",
-              multiplier: 0,
-              payout: 0,
-              resultJson: { hitTile: tile, mines: s.mines, revealed: s.revealed },
-            },
-          };
-        }
-        s.revealed.push(tile);
-        if (s.revealed.length === maxSafe) {
-          const mult = minesMultiplier(mines, s.revealed.length, ctx.cfg);
-          return {
-            settlement: {
-              outcome: "win",
-              multiplier: mult,
-              payout: ROUND2(ctx.amount * mult),
-              resultJson: { mines: s.mines, revealed: s.revealed, reason: "campo-limpio" },
-            },
-          };
-        }
-        return { state: s, publicState: publicMines(s, ctx.cfg) };
-      }
-
-      if (ctx.act === "cashout") {
-        if (s.revealed.length < 1) return { error: "Revela al menos una casilla antes de retirar" };
-        const mult = minesMultiplier(mines, s.revealed.length, ctx.cfg);
-        return {
-          settlement: {
-            outcome: "win",
-            multiplier: mult,
-            payout: ROUND2(ctx.amount * mult),
-            resultJson: { mines: s.mines, revealed: s.revealed },
-          },
-        };
-      }
-
-      return { error: "Acción desconocida" };
-    }
-
-    // ── CRASH ──────────────────────────────────────────────────
-    case "crash": {
-      const s = ctx.state as CrashState;
-      const growth = crashGrowth(ctx.cfg);
-      const now = Date.now();
-
-      if (ctx.act === "tick") {
-        const m = crashMult(s.startedAt, now, growth);
-        if (m >= s.crashPoint) {
-          return {
-            settlement: {
-              outcome: "lose",
-              multiplier: 0,
-              payout: 0,
-              resultJson: { crashPoint: s.crashPoint },
-            },
-          };
-        }
-        return { publicState: publicCrash(s, ctx.cfg, now), serverNow: now };
-      }
-
-      if (ctx.act === "cashout") {
-        const m = crashMult(s.startedAt, now, growth);
-        if (m >= s.crashPoint) {
-          return {
-            settlement: {
-              outcome: "lose",
-              multiplier: 0,
-              payout: 0,
-              resultJson: { crashPoint: s.crashPoint },
-            },
-          };
-        }
-        return {
-          settlement: {
-            outcome: "win",
-            multiplier: m,
-            payout: ROUND2(ctx.amount * m),
-            resultJson: { crashPoint: s.crashPoint, cashoutMultiplier: m },
-          },
-        };
       }
 
       return { error: "Acción desconocida" };

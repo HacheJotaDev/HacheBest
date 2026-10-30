@@ -18,8 +18,8 @@ import { PlinkoGame } from "./games/plinko";
 import { CartaAltaGame } from "./games/cartaalta";
 import { MayorMenorGame } from "./games/mayormenor";
 import { BlackjackGame } from "./games/blackjack";
-import { MinesGame } from "./games/mines";
-import { CrashGame } from "./games/crash";
+import { BacaraGame } from "./games/bacara";
+import { RascaGame } from "./games/rasca";
 
 /** Panel del juego activo con cabecera y límites */
 export function GamePanel() {
@@ -57,10 +57,10 @@ export function GamePanel() {
         return <MayorMenorGame />;
       case "blackjack":
         return <BlackjackGame />;
-      case "mines":
-        return <MinesGame />;
-      case "crash":
-        return <CrashGame />;
+      case "bacara":
+        return <BacaraGame />;
+      case "rasca":
+        return <RascaGame />;
       default:
         return null;
     }

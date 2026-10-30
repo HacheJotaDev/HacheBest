@@ -123,6 +123,13 @@ const globalForDB = globalThis as unknown as {
 };
 
 function seedGameConfigs(data: DBData) {
+  // Purga configuraciones de juegos eliminados del catálogo (p. ej. crash, mines)
+  const valid = new Set<string>(GAMES as readonly string[]);
+  const before = data.gameConfigs.length;
+  if (before > 0) {
+    data.gameConfigs = data.gameConfigs.filter((c) => valid.has(c.game));
+    if (data.gameConfigs.length !== before) scheduleSave();
+  }
   for (const g of GAMES) {
     if (!data.gameConfigs.some((c) => c.game === g)) {
       const def = DEFAULT_GAME_CONFIG[g];
@@ -174,25 +181,38 @@ function loadData(): DBData {
 }
 
 /**
- * Migración v2 — mecánica 50/50 + protección de la casa:
- *  · ajustes por defecto: houseUserWinPercent=50, houseProtection=true
- *  · PPT pasa a decidir-primero (sin empates) y paga 1.9x
- *  · Carta más alta 1.95x · Par/Impar y Moneda 1.95x
+ * Migraciones acumulativas de ajustes y configuraciones:
+ *  · v2 — mecánica 50/50 + protección de la casa
+ *  · v3 — ajuste fino de la ventaja (el jefe probó el casino: el usuario
+ *         ganaba demasiado en dado/mayor-menor/3-en-raya)
  */
 function migrateHouse(data: DBData) {
-  if (data.settings["houseV2"] === "2") return;
-  data.settings["houseV2"] = "2";
-  if (data.settings["houseUserWinPercent"] === undefined) data.settings["houseUserWinPercent"] = "50";
-  if (data.settings["houseProtection"] === undefined) data.settings["houseProtection"] = "true";
+  let touched = false;
   const setCfg = (game: string, cfg: object) => {
     const c = data.gameConfigs.find((x) => x.game === game);
     if (c) c.configJson = JSON.stringify(cfg);
   };
-  setCfg("ppt", { winMultiplier: 1.9 });
-  setCfg("cartaalta", { winMultiplier: 1.95 });
-  setCfg("parimpar", { multiplier: 1.95 });
-  setCfg("moneda", { multiplier: 1.95 });
-  scheduleSave();
+
+  if (data.settings["houseV2"] !== "2") {
+    data.settings["houseV2"] = "2";
+    if (data.settings["houseUserWinPercent"] === undefined) data.settings["houseUserWinPercent"] = "50";
+    if (data.settings["houseProtection"] === undefined) data.settings["houseProtection"] = "true";
+    setCfg("ppt", { winMultiplier: 1.9 });
+    setCfg("cartaalta", { winMultiplier: 1.95 });
+    setCfg("parimpar", { multiplier: 1.95 });
+    setCfg("moneda", { multiplier: 1.95 });
+    touched = true;
+  }
+
+  if (data.settings["houseV3"] !== "3") {
+    data.settings["houseV3"] = "3";
+    setCfg("dado", { houseEdge: 3 });
+    setCfg("mayormenor", { houseEdge: 3 });
+    setCfg("tictactoe", { winMultiplier: 2.2 });
+    touched = true;
+  }
+
+  if (touched) scheduleSave();
 }
 
 /** Escritura atómica: escribe a .tmp y renombra */

@@ -17,11 +17,11 @@ export const GAMES = [
   "tragamonedas",
   "rueda",
   "plinko",
+  "bacara",
+  "rasca",
   "cartaalta",
   "mayormenor",
   "blackjack",
-  "mines",
-  "crash",
 ] as const;
 
 export type GameId = (typeof GAMES)[number];
@@ -33,18 +33,18 @@ export const DEFAULT_GAME_CONFIG: Record<
   parimpar: { name: "Par o Impar", configJson: { multiplier: 1.95 } },
   exacto: { name: "Número Exacto", configJson: { multiplier: 36 } },
   moneda: { name: "Cara o Cruz", configJson: { multiplier: 1.95 } },
-  dado: { name: "Dado", configJson: { houseEdge: 1 } }, // multiplicador = (100-edge)/chance
-  tictactoe: { name: "3 en Raya", configJson: { winMultiplier: 2.5 } },
+  dado: { name: "Dado", configJson: { houseEdge: 3 } }, // multiplicador = (100-edge)/chance
+  tictactoe: { name: "3 en Raya", configJson: { winMultiplier: 2.2 } },
   ppt: { name: "Piedra, Papel o Tijera", configJson: { winMultiplier: 1.9 } },
   ruleta: { name: "Ruleta", configJson: { pleno: 36, doble: 2, docena: 3 } },
   tragamonedas: { name: "Tragamonedas", configJson: { maxPrize: 50 } },
   rueda: { name: "Rueda de la Fortuna", configJson: { segments: 26 } },
   plinko: { name: "Plinko", configJson: { rows: 12 } },
+  bacara: { name: "Bacará", configJson: { jugador: 2, banca: 1.95, empate: 9 } },
+  rasca: { name: "Rasca y Gana", configJson: { maxPrize: 20 } },
   cartaalta: { name: "Carta Más Alta", configJson: { winMultiplier: 1.95 } },
-  mayormenor: { name: "Mayor o Menor", configJson: { houseEdge: 1 } },
+  mayormenor: { name: "Mayor o Menor", configJson: { houseEdge: 3 } },
   blackjack: { name: "Blackjack", configJson: { blackjackPays: 2.5, winPays: 2 } },
-  mines: { name: "Mines", configJson: { edge: 1 } },
-  crash: { name: "Crash", configJson: { growth: 8, houseEdge: 1 } },
 };
 
 export const ROUND2 = (n: number) => Math.round(n * 100) / 100;
@@ -102,6 +102,12 @@ export function validateBet(game: GameId, betType: string, extra?: Record<string
       return betType === "girar" ? null : "Gira los rodillos";
     case "rueda":
       return betType === "girar" ? null : "Gira la rueda";
+    case "bacara":
+      return ["jugador", "banca", "empate"].includes(betType)
+        ? null
+        : "Apuesta a Jugador, Banca o Empate";
+    case "rasca":
+      return betType === "raspar" ? null : "Compra la tarjeta para raspar";
     case "plinko": {
       if (betType !== "drop") return "Suelta la bola";
       return ["bajo", "medio", "alto"].includes(String(extra?.risk)) ? null : "Elige el nivel de riesgo";
@@ -133,6 +139,10 @@ export function playInstant(game: GameId, ctx: Ctx): PlayResult {
       return playTragamonedas(ctx);
     case "rueda":
       return playRueda(ctx);
+    case "bacara":
+      return playBacara(ctx);
+    case "rasca":
+      return playRasca(ctx);
     case "plinko":
       return playPlinko(ctx);
     case "cartaalta":
@@ -327,6 +337,148 @@ function playRueda(ctx: Ctx): PlayResult {
   const index = randomInt(0, RUEDA_SEGMENTS.length);
   const multiplier = RUEDA_SEGMENTS[index] ?? 0;
   return settleByMultiplier(ctx, multiplier, { index, multiplier });
+}
+
+// ── BACARÁ ───────────────────────────────────────────────────
+// El clásico de cartas: apuesta a Jugador (2×), Banca (1,95×) o
+// Empate (9×). Reglas estándar de tercera carta. Ventaja de la
+// casa ≈ 1,1–1,3 % en jugador/banca y ≈ 14 % en empate (real).
+
+function baccaratValue(card: string): number {
+  const r = card.slice(0, -1);
+  if (r === "A") return 1;
+  if (r === "10" || r === "J" || r === "Q" || r === "K") return 0;
+  return Number(r) || 0;
+}
+
+function baccaratTotal(hand: string[]): number {
+  return hand.reduce((acc, c) => acc + baccaratValue(c), 0) % 10;
+}
+
+function playBacara(ctx: Ctx): PlayResult {
+  const choice = ctx.betType; // jugador | banca | empate
+  const player = [drawCardOf(randomInt(0, 13)), drawCardOf(randomInt(0, 13))];
+  const banker = [drawCardOf(randomInt(0, 13)), drawCardOf(randomInt(0, 13))];
+  let pt = baccaratTotal(player);
+  let bt = baccaratTotal(banker);
+  let playerThird: string | null = null;
+  let bankerThird: string | null = null;
+  const natural = pt >= 8 || bt >= 8;
+
+  if (!natural) {
+    if (pt <= 5) {
+      // El jugador roba tercera carta
+      playerThird = drawCardOf(randomInt(0, 13));
+      player.push(playerThird);
+      pt = baccaratTotal(player);
+      // Regla de la banca según el valor de la tercera del jugador
+      const pv = baccaratValue(playerThird);
+      const bankerDraws =
+        bt <= 2 ||
+        (bt === 3 && pv !== 8) ||
+        (bt === 4 && pv >= 2 && pv <= 7) ||
+        (bt === 5 && pv >= 4 && pv <= 7) ||
+        (bt === 6 && (pv === 6 || pv === 7));
+      if (bankerDraws) {
+        bankerThird = drawCardOf(randomInt(0, 13));
+        banker.push(bankerThird);
+        bt = baccaratTotal(banker);
+      }
+    } else if (bt <= 5) {
+      // Jugador plantado: la banca roba con 0-5
+      bankerThird = drawCardOf(randomInt(0, 13));
+      banker.push(bankerThird);
+      bt = baccaratTotal(banker);
+    }
+  }
+
+  const winner = pt > bt ? "jugador" : bt > pt ? "banca" : "empate";
+  let multiplier = 0;
+  if (winner === "empate") {
+    // Empate: la apuesta a empate paga 9×, jugador/banca recuperan
+    multiplier = choice === "empate" ? Number(ctx.cfg.empate ?? 9) : 1;
+  } else if (winner === choice) {
+    multiplier =
+      choice === "jugador" ? Number(ctx.cfg.jugador ?? 2) : Number(ctx.cfg.banca ?? 1.95);
+  }
+  const resultJson = {
+    player,
+    banker,
+    playerTotal: pt,
+    bankerTotal: bt,
+    playerThird,
+    bankerThird,
+    natural,
+    winner,
+    choice,
+  };
+  return settleByMultiplier(ctx, multiplier, resultJson);
+}
+
+// ── RASCA Y GANA ─────────────────────────────────────────────
+// Tarjeta rasca 3×3: tres símbolos iguales pagan. Tabla con ~8 %
+// de ventaja para la casa: 59,7 % nada · 30 % ×1,5 · 7 % ×3 ·
+// 2 % ×5 · 1 % ×10 · 0,3 % ×20.
+export const RASCA_PRIZES = [
+  { mult: 1.5, symbol: "🍋", weight: 300 },
+  { mult: 3, symbol: "🔔", weight: 70 },
+  { mult: 5, symbol: "⭐", weight: 20 },
+  { mult: 10, symbol: "💎", weight: 10 },
+  { mult: 20, symbol: "7️⃣", weight: 3 },
+] as const;
+
+const RASCA_FILLERS = ["🍒", "🍀", "🍇", "🍋", "🔔"] as const;
+
+function shuffleCells(cells: string[]): string[] {
+  const out = [...cells];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = randomInt(0, i + 1);
+    const tmp = out[i]!;
+    out[i] = out[j]!;
+    out[j] = tmp;
+  }
+  return out;
+}
+
+function playRasca(ctx: Ctx): PlayResult {
+  const roll = randomInt(0, 1000);
+  let acc = 0;
+  let prize: (typeof RASCA_PRIZES)[number] | null = null;
+  for (const p of RASCA_PRIZES) {
+    acc += p.weight;
+    if (roll < acc) {
+      prize = p;
+      break;
+    }
+  }
+
+  let cells: string[];
+  if (prize) {
+    // Premio: 3 iguales + rellenos en parejas (nunca otro triple)
+    const fillers = RASCA_FILLERS.filter((s) => s !== prize.symbol);
+    cells = [
+      prize.symbol, prize.symbol, prize.symbol,
+      fillers[0]!, fillers[0]!,
+      fillers[1]!, fillers[1]!,
+      fillers[2]!, fillers[2]!,
+    ];
+  } else {
+    // Sin premio: ningún símbolo alcanza 3 apariciones (2+2+2+2+1)
+    cells = [
+      RASCA_FILLERS[0]!, RASCA_FILLERS[0]!,
+      RASCA_FILLERS[1]!, RASCA_FILLERS[1]!,
+      RASCA_FILLERS[2]!, RASCA_FILLERS[2]!,
+      RASCA_FILLERS[3]!, RASCA_FILLERS[3]!,
+      RASCA_FILLERS[4]!,
+    ];
+  }
+  cells = shuffleCells(cells);
+  const multiplier = prize ? prize.mult : 0;
+  return settleByMultiplier(ctx, multiplier, {
+    cells,
+    prize: prize?.symbol ?? null,
+    multiplier,
+  });
 }
 
 // ── PLINKO ───────────────────────────────────────────────────

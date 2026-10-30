@@ -6,9 +6,9 @@ import { NextResponse } from "next/server";
  */
 const GAMES = [
   "parimpar", "exacto", "moneda", "dado", "ppt", "ruleta", "tragamonedas",
-  "rueda", "plinko", "cartaalta",           // instantáneos
-  "mayormenor", "blackjack", "mines", "crash", // multi-fase
-  "tictactoe",                              // partida
+  "rueda", "plinko", "bacara", "rasca", "cartaalta", // instantáneos
+  "mayormenor", "blackjack",                        // multi-fase
+  "tictactoe",                                      // partida
 ];
 
 export function GET() {
